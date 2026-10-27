@@ -23,7 +23,8 @@ if(WIN32)
     target_include_directories(ffgl-sdk SYSTEM PUBLIC "${_glew}/include")
     target_link_libraries(ffgl-sdk PUBLIC "${_glew}/lib/Release/x64/glew32s.lib" opengl32)
     # glew32s.lib asks for the release CRT (LIBCMT); Debug links LIBCMTD instead.
-    target_link_options(ffgl-sdk INTERFACE "$<$<CONFIG:Debug>:/NODEFAULTLIB:LIBCMT>")
+    # LNK4099: glew32s.lib ships without its PDB.
+    target_link_options(ffgl-sdk INTERFACE "$<$<CONFIG:Debug>:/NODEFAULTLIB:LIBCMT;/ignore:4099>")
 elseif(APPLE)
     target_compile_definitions(ffgl-sdk PUBLIC GL_SILENCE_DEPRECATION)
     # Same frameworks as the SDK's Xcode project (Carbon is used by ffglex/FFGLUtilities.cpp).
