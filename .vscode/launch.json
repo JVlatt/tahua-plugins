@@ -1,0 +1,30 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Resolume Arena (Windows, debug)",
+      "type": "cppvsdbg",
+      "request": "launch",
+      "program": "C:\\Program Files\\Resolume Arena\\Arena.exe",
+      "args": ["--nosplash", "--debug-gl"],
+      "cwd": "C:\\Program Files\\Resolume Arena",
+      "console": "internalConsole",
+      "preLaunchTask": "build: Debug + install"
+    },
+    {
+      "name": "Resolume Arena (macOS, debug)",
+      "type": "lldb",
+      "request": "launch",
+      "program": "/Applications/Resolume Arena/Arena.app/Contents/MacOS/Arena",
+      "args": ["--nosplash", "--debug-gl"],
+      "cwd": "/Applications/Resolume Arena",
+      "preLaunchTask": "build: Debug + install"
+    },
+    {
+      "name": "Attach to running Arena (Windows)",
+      "type": "cppvsdbg",
+      "request": "attach",
+      "processId": "${command:pickProcess}"
+    }
+  ]
+}

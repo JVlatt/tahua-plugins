@@ -1,0 +1,56 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "build: Debug + install",
+      "detail": "Configure, build all plugins in Debug, copy them into Resolume's Extra Effects",
+      "type": "process",
+      "command": "cmake",
+      "windows": { "args": ["--workflow", "--preset", "windows-dev"] },
+      "osx": { "args": ["--workflow", "--preset", "macos-dev"] },
+      "options": { "cwd": "${workspaceFolder}" },
+      "problemMatcher": ["$msCompile", "$gcc"],
+      "group": { "kind": "build", "isDefault": true }
+    },
+    {
+      "label": "build: Release + install",
+      "detail": "Configure, build all plugins in Release, copy them into Resolume's Extra Effects",
+      "type": "process",
+      "command": "cmake",
+      "windows": { "args": ["--workflow", "--preset", "windows-release"] },
+      "osx": { "args": ["--workflow", "--preset", "macos-release"] },
+      "options": { "cwd": "${workspaceFolder}" },
+      "problemMatcher": ["$msCompile", "$gcc"],
+      "group": "build"
+    },
+    {
+      "label": "plugin: new",
+      "detail": "Create plugins/<Name> from a template with the next free id",
+      "type": "process",
+      "command": "cmake",
+      "args": [
+        "-DNAME=${input:pluginName}",
+        "-DTYPE=${input:pluginType}",
+        "-DDESCRIPTION=${input:pluginDescription}",
+        "-P",
+        "scripts/new_plugin.cmake"
+      ],
+      "options": { "cwd": "${workspaceFolder}" },
+      "problemMatcher": []
+    },
+    {
+      "label": "clean",
+      "detail": "Delete the build folder",
+      "type": "process",
+      "command": "cmake",
+      "args": ["-E", "rm", "-rf", "build"],
+      "options": { "cwd": "${workspaceFolder}" },
+      "problemMatcher": []
+    }
+  ],
+  "inputs": [
+    { "id": "pluginName", "type": "promptString", "description": "Plugin name (PascalCase, max 10 chars)" },
+    { "id": "pluginType", "type": "pickString", "description": "Plugin type", "options": ["effect", "source", "mixer"] },
+    { "id": "pluginDescription", "type": "promptString", "description": "One-line description (no quotes)" }
+  ]
+}

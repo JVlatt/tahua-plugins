@@ -1,0 +1,11 @@
+{
+  "cmake.useCMakePresets": "always",
+  "cmake.configureOnOpen": true,
+  "C_Cpp.default.configurationProvider": "ms-vscode.cmake-tools",
+  "C_Cpp.clang_format_style": "file",
+  "editor.formatOnSave": false,
+  "files.associations": {
+    "*.cpp.in": "cpp",
+    "*.h.in": "cpp"
+  }
+}
