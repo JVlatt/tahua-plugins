@@ -1,0 +1,21 @@
+# CMake build trees
+/build/
+/out/
+CMakeUserPresets.json
+
+# Release packaging
+/dist/
+
+# IDE / OS
+.vs/
+.idea/
+*.user
+.DS_Store
+Thumbs.db
+
+# VS Code: keep the shared config, ignore personal files
+.vscode/*
+!.vscode/tasks.json
+!.vscode/launch.json
+!.vscode/settings.json
+!.vscode/extensions.json
