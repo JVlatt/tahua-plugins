@@ -41,7 +41,7 @@ winget install Microsoft.VisualStudio.2022.BuildTools --override "--quiet --wait
 ## Cloner
 
 ```bash
-git clone --recurse-submodules https://github.com/<compte>/tahua-plugins.git
+git clone --recurse-submodules https://github.com/JVlatt/tahua-plugins.git
 ```
 
 Si le repo a été cloné sans `--recurse-submodules` :
