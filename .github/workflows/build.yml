@@ -1,0 +1,164 @@
+name: Build
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build (${{ matrix.label }})
+    runs-on: ${{ matrix.os }}
+    env:
+      HAS_NOTARY: ${{ secrets.APPLE_ID != '' }}
+    strategy:
+      # Let both platforms finish so a failure on one is reported alongside the other;
+      # the workflow still fails if either job fails.
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            label: windows-x64
+            preset: windows-ci
+          - os: macos-latest
+            label: macos-universal
+            preset: macos-ci
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          submodules: recursive
+
+      - name: Package name
+        shell: bash
+        run: |
+          if [[ "$GITHUB_REF_TYPE" == "tag" ]]; then version="$GITHUB_REF_NAME"; else version="ci-${GITHUB_SHA::7}"; fi
+          echo "PACKAGE=tahua-plugins-${version}-${{ matrix.label }}" >> "$GITHUB_ENV"
+
+      - name: Configure and build (Release)
+        run: cmake --workflow --preset ${{ matrix.preset }}
+
+      - name: Check plugins (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $vs = & "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe" -latest -property installationPath
+          $dumpbin = (Get-ChildItem "$vs\VC\Tools\MSVC\*\bin\Hostx64\x64\dumpbin.exe" | Select-Object -First 1).FullName
+          $dlls = Get-ChildItem "build/${{ matrix.preset }}/bin/Release/*.dll"
+          if (-not $dlls) { throw "No plugin was built." }
+          foreach ($dll in $dlls) {
+            $deps = & $dumpbin /nologo /dependents $dll.FullName | Out-String
+            if ($deps -match '(?i)vcruntime|msvcp|ucrtbase|api-ms-win-crt') { throw "$($dll.Name) depends on the MSVC runtime:`n$deps" }
+            $exports = & $dumpbin /nologo /exports $dll.FullName | Out-String
+            if ($exports -notmatch 'plugMain') { throw "$($dll.Name) does not export plugMain." }
+            Write-Host "OK $($dll.Name)"
+          }
+
+      - name: Check plugins (macOS)
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          shopt -s nullglob
+          bundles=(build/${{ matrix.preset }}/bin/Release/*.bundle)
+          [[ ${#bundles[@]} -gt 0 ]] || { echo "::error::No plugin was built."; exit 1; }
+          for b in "${bundles[@]}"; do
+            exe="$b/Contents/MacOS/$(basename "$b" .bundle)"
+            archs=$(lipo -archs "$exe")
+            [[ "$archs" == *arm64* && "$archs" == *x86_64* ]] || { echo "::error::$b is not universal ($archs)"; exit 1; }
+            nm -gU "$exe" | grep -q plugMain || { echo "::error::$b does not export plugMain"; exit 1; }
+            codesign --verify --strict "$b"
+            echo "OK $b ($archs)"
+          done
+
+      - name: Stage package
+        shell: bash
+        run: |
+          cmake --install "build/${{ matrix.preset }}" --config Release --prefix "dist/$PACKAGE"
+          cp LICENSE "dist/$PACKAGE/LICENSE.txt"
+          if [[ "$RUNNER_OS" == "Windows" ]]; then
+            cat > "dist/$PACKAGE/INSTALL.txt" <<'EOF'
+          Tahua plugins for Resolume Arena 7 (Windows x64)
+
+          1. Quit Resolume Arena.
+          2. Copy the .dll files into Documents\Resolume Arena\Extra Effects
+          3. Start Arena: the plugins are listed under the "Tahua" names.
+          EOF
+          else
+            cat > "dist/$PACKAGE/INSTALL.txt" <<'EOF'
+          Tahua plugins for Resolume Arena 7 (macOS, Intel + Apple Silicon)
+
+          1. Quit Resolume Arena.
+          2. Copy the .bundle folders into ~/Documents/Resolume Arena/Extra Effects
+          3. The plugins are not notarized: remove the download quarantine with
+               xattr -dr com.apple.quarantine ~/Documents/"Resolume Arena"/"Extra Effects"/Tahua*.bundle
+          4. Start Arena: the plugins are listed under the "Tahua" names.
+          EOF
+          fi
+
+      # Optional, not active yet: runs only once the APPLE_* secrets are configured.
+      # Replaces the ad-hoc signature with a Developer ID one and notarizes the bundles.
+      - name: Sign and notarize (macOS, optional)
+        if: runner.os == 'macOS' && env.HAS_NOTARY == 'true'
+        shell: bash
+        env:
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
+          APPLE_CERT_P12_BASE64: ${{ secrets.APPLE_CERT_P12_BASE64 }}
+          APPLE_CERT_PASSWORD: ${{ secrets.APPLE_CERT_PASSWORD }}
+        run: |
+          keychain="$RUNNER_TEMP/signing.keychain-db"
+          security create-keychain -p ci "$keychain"
+          security set-keychain-settings -lut 3600 "$keychain"
+          security unlock-keychain -p ci "$keychain"
+          echo "$APPLE_CERT_P12_BASE64" | base64 --decode > "$RUNNER_TEMP/cert.p12"
+          security import "$RUNNER_TEMP/cert.p12" -k "$keychain" -P "$APPLE_CERT_PASSWORD" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple: -s -k ci "$keychain"
+          security list-keychains -d user -s "$keychain"
+          for b in "dist/$PACKAGE"/*.bundle; do
+            codesign --force --timestamp --options runtime --sign "Developer ID Application" "$b"
+          done
+          ditto -c -k --keepParent "dist/$PACKAGE" "$RUNNER_TEMP/notarize.zip"
+          xcrun notarytool submit "$RUNNER_TEMP/notarize.zip" --apple-id "$APPLE_ID" \
+            --team-id "$APPLE_TEAM_ID" --password "$APPLE_APP_PASSWORD" --wait
+
+      - name: Zip (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: Compress-Archive -Path "dist/$env:PACKAGE" -DestinationPath "dist/$env:PACKAGE.zip"
+
+      - name: Zip (macOS)
+        if: runner.os == 'macOS'
+        # ditto keeps bundle structure, permissions and code signatures intact.
+        run: ditto -c -k --keepParent "dist/$PACKAGE" "dist/$PACKAGE.zip"
+
+      - uses: actions/upload-artifact@v7
+        with:
+          path: dist/${{ env.PACKAGE }}.zip
+          archive: false
+          if-no-files-found: error
+
+  release:
+    name: GitHub Release
+    if: github.ref_type == 'tag' && startsWith(github.ref_name, 'v')
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          path: dist
+          skip-decompress: true
+      - name: Create release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mapfile -t zips < <(find dist -type f -name '*.zip')
+          [[ ${#zips[@]} -eq 2 ]] || { echo "::error::Expected 2 packages, found: ${zips[*]}"; exit 1; }
+          gh release create "$GITHUB_REF_NAME" "${zips[@]}" \
+            --repo "$GITHUB_REPOSITORY" --title "$GITHUB_REF_NAME" --generate-notes --verify-tag
