@@ -2,7 +2,7 @@
 using namespace ffglqs;
 
 // Note: the SDK spells this one createPlugin (lowercase c).
-static PluginInstance pluginInstance = Mixer::createPlugin< @NAME@ >( tahua::MakePluginInfo( "@DESCRIPTION@" ) );
+static PluginInstance pluginInstance = Mixer::createPlugin< @NAME@ >( tahua::MakePluginInfo() );
 
 // mixVal is the crossfade value driven by Resolume (added by ffglqs::Mixer).
 // Also available: textureDest, textureSrc, i_uv_dest, i_uv_src, resolution, time, ...

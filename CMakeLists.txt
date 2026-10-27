@@ -21,6 +21,8 @@ include(TahuaPlugin)
 # Every plugins/<Name>/ folder that has a CMakeLists.txt is built: adding a plugin
 # never requires touching this file. CONFIGURE_DEPENDS re-runs the glob on build.
 file(GLOB _plugin_dirs CONFIGURE_DEPENDS LIST_DIRECTORIES true "${CMAKE_CURRENT_SOURCE_DIR}/plugins/*")
+# Manifest fragments are rewritten by tahua_add_plugin(): drop those of removed plugins.
+file(REMOVE_RECURSE "${CMAKE_BINARY_DIR}/manifest")
 foreach(_dir IN LISTS _plugin_dirs)
     if(EXISTS "${_dir}/CMakeLists.txt")
         add_subdirectory("${_dir}")

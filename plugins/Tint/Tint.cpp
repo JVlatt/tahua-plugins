@@ -1,7 +1,7 @@
 #include "Tint.h"
 using namespace ffglqs;
 
-static PluginInstance pluginInstance = Effect::CreatePlugin< Tint >( tahua::MakePluginInfo( "Hue shift, saturation and invert" ) );
+static PluginInstance pluginInstance = Effect::CreatePlugin< Tint >( tahua::MakePluginInfo() );
 
 // Each parameter added in the constructor becomes a uniform of the same name.
 // Also available: inputTexture, i_uv, resolution, time, deltaTime, frame, bpm, phase.

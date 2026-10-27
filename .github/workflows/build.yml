@@ -74,6 +74,18 @@ jobs:
             echo "OK $b ($archs)"
           done
 
+      # One zip per plugin + plugins-<os>.json, merged into manifest.json by the release job
+      # (read by Tahua Launcher).
+      # If notarization gets enabled, these zips must be made from the re-signed bundles.
+      - name: Package plugins individually
+        run: cmake -DBUILD_DIR=build/${{ matrix.preset }} -DOUT_DIR=dist/release -P scripts/package_plugins.cmake
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: release-files-${{ matrix.label }}
+          path: dist/release/
+          if-no-files-found: error
+
       - name: Stage package
         shell: bash
         run: |
@@ -142,23 +154,55 @@ jobs:
           archive: false
           if-no-files-found: error
 
+  # Runs on every push so the manifest merge is checked before any tag; the release
+  # itself is only created for v* tags.
   release:
-    name: GitHub Release
-    if: github.ref_type == 'tag' && startsWith(github.ref_name, 'v')
+    name: Manifest and GitHub Release
     needs: build
     runs-on: ubuntu-latest
     permissions:
       contents: write
     steps:
+      # All-plugins zips (one per OS), uploaded as-is: do not decompress them.
       - uses: actions/download-artifact@v8
         with:
-          path: dist
+          pattern: tahua-plugins-*
+          path: dist/packages
           skip-decompress: true
+      # Per-plugin zips + plugins-<os>.json from both OS.
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: release-files-*
+          path: dist/release
+          merge-multiple: true
+
+      - name: Build manifest.json
+        run: |
+          tag="$GITHUB_REF_NAME"; [[ "$GITHUB_REF_TYPE" == "tag" ]] || tag="ci-${GITHUB_SHA::7}"
+          base="https://github.com/$GITHUB_REPOSITORY/releases/download/$tag"
+          jq -s --arg tag "$tag" --arg base "$base" '
+            { schemaVersion: 1,
+              release: $tag,
+              plugins: (add | group_by(.id) | map(reduce .[] as $p ({}; . * $p))
+                        | map(.assets |= with_entries(.value.url = ($base + "/" + .value.archive)))) }
+          ' dist/release/plugins-*.json > dist/release/manifest.json
+          jq -e '.plugins | length > 0 and all(.assets | has("windows-x64") and has("macos-universal"))' \
+            dist/release/manifest.json > /dev/null \
+            || { echo "::error::Every plugin must be built for both windows-x64 and macos-universal"; exit 1; }
+          cat dist/release/manifest.json
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: manifest
+          path: dist/release/manifest.json
+
       - name: Create release
+        if: github.ref_type == 'tag' && startsWith(github.ref_name, 'v')
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          mapfile -t zips < <(find dist -type f -name '*.zip')
-          [[ ${#zips[@]} -eq 2 ]] || { echo "::error::Expected 2 packages, found: ${zips[*]}"; exit 1; }
-          gh release create "$GITHUB_REF_NAME" "${zips[@]}" \
+          mapfile -t packages < <(find dist/packages -type f -name '*.zip')
+          [[ ${#packages[@]} -eq 2 ]] || { echo "::error::Expected 2 OS packages, found: ${packages[*]}"; exit 1; }
+          mapfile -t plugins < <(find dist/release -type f -name 'Tahua*.zip')
+          gh release create "$GITHUB_REF_NAME" "${packages[@]}" "${plugins[@]}" dist/release/manifest.json \
             --repo "$GITHUB_REPOSITORY" --title "$GITHUB_REF_NAME" --generate-notes --verify-tag

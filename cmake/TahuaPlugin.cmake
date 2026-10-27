@@ -2,12 +2,16 @@
 #     ID      <4-char id, e.g. TE01>
 #     TYPE    effect|source|mixer
 #     VERSION <major.minor>
+#     DESCRIPTION "<one line>"
 #     SOURCES <files...>)
 #
 # Builds plugins/<Name> as a Resolume-loadable FFGL plugin:
 #   Windows: TahuaName.dll      macOS: TahuaName.bundle (universal, ad-hoc signed)
-# The plugin id, display name ("Tahua <Name>") and version are passed to the code as
-# TAHUA_PLUGIN_* macros (see common/include/TahuaPlugin.h), so they live in one place.
+# The plugin id, display name ("Tahua <Name>"), version and description are passed to the
+# code as TAHUA_PLUGIN_* macros (see common/include/TahuaPlugin.h), so they live in one place.
+# They are also written to <build>/manifest/<Name>.json, from which CI builds the release
+# manifest.json read by Tahua Launcher. Bump VERSION whenever a plugin changes: the
+# launcher only offers an update when the version differs.
 
 option(TAHUA_INSTALL_AFTER_BUILD "Copy each plugin into Resolume's Extra Effects folder after build" OFF)
 
@@ -28,7 +32,7 @@ set(TAHUA_EXTRA_EFFECTS_DIR "${_extra_effects}" CACHE PATH "Resolume Extra Effec
 set(_tahua_root "${CMAKE_CURRENT_LIST_DIR}/..")
 
 function(tahua_add_plugin name)
-    cmake_parse_arguments(PARSE_ARGV 1 ARG "" "ID;TYPE;VERSION" "SOURCES")
+    cmake_parse_arguments(PARSE_ARGV 1 ARG "" "ID;TYPE;VERSION;DESCRIPTION" "SOURCES")
 
     # --- validation -------------------------------------------------------------------
     set(_where "plugins/${name}/CMakeLists.txt")
@@ -47,6 +51,9 @@ function(tahua_add_plugin name)
     set(_minor ${CMAKE_MATCH_2})
     if(NOT ARG_SOURCES)
         message(FATAL_ERROR "${_where}: SOURCES is empty.")
+    endif()
+    if(NOT ARG_DESCRIPTION OR ARG_DESCRIPTION MATCHES "[\"\\\\]")
+        message(FATAL_ERROR "${_where}: DESCRIPTION is required and must not contain quotes or backslashes.")
     endif()
 
     # FFGL stores the plugin name in a 16-char field: longer names are truncated by the SDK.
@@ -73,8 +80,29 @@ function(tahua_add_plugin name)
     target_compile_definitions(${name} PRIVATE
         TAHUA_PLUGIN_ID="${ARG_ID}"
         TAHUA_PLUGIN_NAME="${_display_name}"
+        TAHUA_PLUGIN_DESCRIPTION="${ARG_DESCRIPTION}"
         TAHUA_PLUGIN_VERSION_MAJOR=${_major}
         TAHUA_PLUGIN_VERSION_MINOR=${_minor})
+
+    # Manifest fragment (one per plugin and OS), merged by CI into the release manifest.json.
+    if(APPLE)
+        set(_file "Tahua${name}.bundle")
+        set(_os "macos-universal")
+    else()
+        set(_file "Tahua${name}.dll")
+        set(_os "windows-x64")
+    endif()
+    file(WRITE "${CMAKE_BINARY_DIR}/manifest/${name}.json" "{
+  \"id\": \"${ARG_ID}\",
+  \"name\": \"${name}\",
+  \"displayName\": \"${_display_name}\",
+  \"type\": \"${ARG_TYPE}\",
+  \"version\": \"${ARG_VERSION}\",
+  \"description\": \"${ARG_DESCRIPTION}\",
+  \"minResolume\": \"7.3.1\",
+  \"assets\": { \"${_os}\": { \"file\": \"${_file}\", \"archive\": \"Tahua${name}-${ARG_VERSION}-${_os}.zip\" } }
+}
+")
 
     # Prefixed file name so it cannot clash with other vendors' files in Extra Effects.
     set_target_properties(${name} PROPERTIES

@@ -107,7 +107,7 @@ Le script crée `plugins/Blur/` avec les sources, le `CMakeLists.txt` et le READ
 2. compléter `plugins/Blur/README.md` (paramètres, notes de version) ;
 3. ajouter le plugin dans le tableau en haut de ce README.
 
-L'ID, le nom affiché et la version sont définis une seule fois, dans `plugins/<Nom>/CMakeLists.txt` (`tahua_add_plugin(... ID ... VERSION ...)`). **Un ID ne doit jamais changer une fois publié**, car Resolume s'en sert pour retrouver le plugin dans les compositions sauvegardées. Le configure échoue si deux plugins partagent un ID.
+L'ID, le nom affiché, la version et la description sont définis une seule fois, dans `plugins/<Nom>/CMakeLists.txt` (`tahua_add_plugin(... ID ... VERSION ... DESCRIPTION ...)`). **Un ID ne doit jamais changer une fois publié**, car Resolume s'en sert pour retrouver le plugin dans les compositions sauvegardées. Le configure échoue si deux plugins partagent un ID.
 
 Les shaders sont en GLSL `#version 410 core`, le maximum disponible sous macOS. Les textures de Resolume sont en couleurs prémultipliées : voir les gabarits.
 
@@ -139,6 +139,15 @@ git push origin v0.1.0
 ```
 
 Le tag déclenche la création d'une GitHub Release avec `tahua-plugins-v0.1.0-windows-x64.zip` et `tahua-plugins-v0.1.0-macos-universal.zip`. Chaque zip contient tous les plugins, la licence et un `INSTALL.txt`.
+
+La release contient aussi, pour [Tahua Launcher](https://github.com/JVlatt/tahua-launcher) :
+
+- un zip par plugin et par OS, par exemple `TahuaTint-1.0-windows-x64.zip`, avec le plugin seul à la racine ;
+- un `manifest.json` qui décrit chaque plugin (id, nom, type, version, description) et, pour chaque OS, l'URL, le sha256 et la taille de son zip.
+
+Le launcher lit `https://github.com/JVlatt/tahua-plugins/releases/latest/download/manifest.json` et compare la **version de chaque plugin** à celle qui est installée. **Il faut donc incrémenter `VERSION` dans le `CMakeLists.txt` d'un plugin à chaque modification** ; sinon le launcher ne proposera pas la mise à jour.
+
+Le manifeste est aussi généré sur chaque push (artefact `manifest`) : une erreur de fusion apparaît avant le tag. Un plugin qui ne compile que sur un seul OS fait échouer cette étape.
 
 ### Notarisation macOS (optionnelle, pas encore active)
 
