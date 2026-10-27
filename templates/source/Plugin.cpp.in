@@ -1,0 +1,20 @@
+#include "@NAME@.h"
+using namespace ffglqs;
+
+static PluginInstance pluginInstance = Source::CreatePlugin< @NAME@ >( tahua::MakePluginInfo( "@DESCRIPTION@" ) );
+
+// Each parameter added in the constructor becomes a uniform of the same name.
+// Also available: i_uv, resolution, time, deltaTime, frame, bpm, phase.
+static const char fragmentShader[] = R"(
+void main()
+{
+	vec3 color = 0.5 + 0.5 * cos( time * Speed + i_uv.xyx + vec3( 0.0, 2.0, 4.0 ) );
+	fragColor  = vec4( color, 1.0 );
+}
+)";
+
+@NAME@::@NAME@()
+{
+	SetFragmentShader( fragmentShader );
+	AddParam( ParamRange::Create( "Speed", 1.0f, { 0.0f, 10.0f } ) );
+}

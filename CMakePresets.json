@@ -1,0 +1,107 @@
+{
+  "version": 6,
+  "cmakeMinimumRequired": { "major": 3, "minor": 25, "patch": 0 },
+  "configurePresets": [
+    {
+      "name": "base",
+      "hidden": true,
+      "binaryDir": "${sourceDir}/build/${presetName}"
+    },
+    {
+      "name": "windows",
+      "displayName": "Windows x64 (MSVC) - installs into Extra Effects",
+      "inherits": "base",
+      "generator": "Visual Studio 17 2022",
+      "architecture": "x64",
+      "cacheVariables": { "TAHUA_INSTALL_AFTER_BUILD": "ON" },
+      "condition": { "type": "equals", "lhs": "${hostSystemName}", "rhs": "Windows" }
+    },
+    {
+      "name": "windows-ci",
+      "displayName": "Windows x64 (MSVC) - CI, no install",
+      "inherits": "windows",
+      "cacheVariables": { "TAHUA_INSTALL_AFTER_BUILD": "OFF" }
+    },
+    {
+      "name": "macos",
+      "hidden": true,
+      "inherits": "base",
+      "generator": "Unix Makefiles",
+      "condition": { "type": "equals", "lhs": "${hostSystemName}", "rhs": "Darwin" }
+    },
+    {
+      "name": "macos-debug",
+      "displayName": "macOS universal Debug - installs into Extra Effects",
+      "inherits": "macos",
+      "cacheVariables": { "CMAKE_BUILD_TYPE": "Debug", "TAHUA_INSTALL_AFTER_BUILD": "ON" }
+    },
+    {
+      "name": "macos-release",
+      "displayName": "macOS universal Release - installs into Extra Effects",
+      "inherits": "macos",
+      "cacheVariables": { "CMAKE_BUILD_TYPE": "Release", "TAHUA_INSTALL_AFTER_BUILD": "ON" }
+    },
+    {
+      "name": "macos-ci",
+      "displayName": "macOS universal Release - CI, no install",
+      "inherits": "macos",
+      "cacheVariables": { "CMAKE_BUILD_TYPE": "Release", "TAHUA_INSTALL_AFTER_BUILD": "OFF" }
+    }
+  ],
+  "buildPresets": [
+    { "name": "windows-debug", "configurePreset": "windows", "configuration": "Debug" },
+    { "name": "windows-release", "configurePreset": "windows", "configuration": "Release" },
+    { "name": "windows-ci", "configurePreset": "windows-ci", "configuration": "Release" },
+    { "name": "macos-debug", "configurePreset": "macos-debug" },
+    { "name": "macos-release", "configurePreset": "macos-release" },
+    { "name": "macos-ci", "configurePreset": "macos-ci" }
+  ],
+  "workflowPresets": [
+    {
+      "name": "windows-dev",
+      "displayName": "Windows: configure + Debug build + install",
+      "steps": [
+        { "type": "configure", "name": "windows" },
+        { "type": "build", "name": "windows-debug" }
+      ]
+    },
+    {
+      "name": "windows-release",
+      "displayName": "Windows: configure + Release build + install",
+      "steps": [
+        { "type": "configure", "name": "windows" },
+        { "type": "build", "name": "windows-release" }
+      ]
+    },
+    {
+      "name": "windows-ci",
+      "steps": [
+        { "type": "configure", "name": "windows-ci" },
+        { "type": "build", "name": "windows-ci" }
+      ]
+    },
+    {
+      "name": "macos-dev",
+      "displayName": "macOS: configure + Debug build + install",
+      "steps": [
+        { "type": "configure", "name": "macos-debug" },
+        { "type": "build", "name": "macos-debug" }
+      ]
+    },
+    {
+      "name": "macos-release",
+      "displayName": "macOS: configure + Release build + install",
+      "steps": [
+        { "type": "configure", "name": "macos-release" },
+        { "type": "build", "name": "macos-release" }
+      ]
+    },
+    {
+      "name": "macos-ci",
+      "steps": [
+        { "type": "configure", "name": "macos-ci" },
+        { "type": "build", "name": "macos-ci" }
+      ]
+    }
+  ]
+}

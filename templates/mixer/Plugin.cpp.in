@@ -1,0 +1,21 @@
+#include "@NAME@.h"
+using namespace ffglqs;
+
+// Note: the SDK spells this one createPlugin (lowercase c).
+static PluginInstance pluginInstance = Mixer::createPlugin< @NAME@ >( tahua::MakePluginInfo( "@DESCRIPTION@" ) );
+
+// mixVal is the crossfade value driven by Resolume (added by ffglqs::Mixer).
+// Also available: textureDest, textureSrc, i_uv_dest, i_uv_src, resolution, time, ...
+static const char fragmentShader[] = R"(
+void main()
+{
+	vec4 dest = texture( textureDest, i_uv_dest );
+	vec4 src  = texture( textureSrc, i_uv_src );
+	fragColor = mix( dest, src, mixVal );
+}
+)";
+
+@NAME@::@NAME@()
+{
+	SetFragmentShader( fragmentShader );
+}

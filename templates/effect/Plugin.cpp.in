@@ -1,0 +1,26 @@
+#include "@NAME@.h"
+using namespace ffglqs;
+
+static PluginInstance pluginInstance = Effect::CreatePlugin< @NAME@ >( tahua::MakePluginInfo( "@DESCRIPTION@" ) );
+
+// Each parameter added in the constructor becomes a uniform of the same name.
+// Also available: inputTexture, i_uv, resolution, time, deltaTime, frame, bpm, phase.
+static const char fragmentShader[] = R"(
+void main()
+{
+	vec4 color = texture( inputTexture, i_uv );
+	// Resolume textures are premultiplied: unpremultiply, process, premultiply again.
+	if( color.a > 0.0 )
+		color.rgb /= color.a;
+
+	color.rgb = mix( color.rgb, vec3( 1.0 ) - color.rgb, Amount );
+
+	fragColor = vec4( clamp( color.rgb, 0.0, 1.0 ) * color.a, color.a );
+}
+)";
+
+@NAME@::@NAME@()
+{
+	SetFragmentShader( fragmentShader );
+	AddParam( Param::Create( "Amount", 0.0f ) );
+}

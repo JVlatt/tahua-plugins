@@ -1,0 +1,26 @@
+# Tahua @NAME@
+
+@DESCRIPTION@
+
+| | |
+|---|---|
+| **Type** | @TYPE_LABEL@ |
+| **ID FFGL** | `@ID@` |
+| **Fichier** | `Tahua@NAME@.dll` (Windows) / `Tahua@NAME@.bundle` (macOS) |
+
+## Paramètres
+
+| Nom | Type | Plage | Défaut | Description |
+|---|---|---|---|---|
+| _à compléter_ | | | | |
+
+## Compatibilité
+
+- Resolume Arena / Avenue 7.3.1 ou plus récent (FFGL 2.x)
+- Windows 10/11 x64
+- macOS 10.15 ou plus récent, Intel et Apple Silicon (binaire universel)
+
+## Notes de version
+
+### 1.0 — @DATE@
+- Première version.

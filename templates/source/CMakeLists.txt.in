@@ -1,0 +1,5 @@
+tahua_add_plugin(@NAME@
+    ID      @ID@
+    TYPE    @TYPE@
+    VERSION 1.0
+    SOURCES @NAME@.h @NAME@.cpp)

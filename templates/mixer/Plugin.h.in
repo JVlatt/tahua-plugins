@@ -1,0 +1,8 @@
+#pragma once
+#include <TahuaPlugin.h>
+
+class @NAME@ : public ffglqs::Mixer
+{
+public:
+	@NAME@();
+};
