@@ -24,7 +24,7 @@ Le SDK est figé sur la branche `master` de resolume/ffgl (FFGL 2.2 + GLEW, comp
 ## Prérequis
 
 **Windows**
-- Visual Studio 2022 ou Build Tools 2022, avec la charge de travail « Développement Desktop en C++ ».
+- Visual Studio ou Build Tools 2022 ou plus récent, avec la charge de travail « Développement Desktop en C++ ». CMake choisit automatiquement la version la plus récente installée.
 - CMake ≥ 3.25 et Git.
 
 ```powershell

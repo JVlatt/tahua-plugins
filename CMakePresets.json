@@ -9,9 +9,8 @@
     },
     {
       "name": "windows",
-      "displayName": "Windows x64 (MSVC) - installs into Extra Effects",
+      "displayName": "Windows x64 (newest Visual Studio) - installs into Extra Effects",
       "inherits": "base",
-      "generator": "Visual Studio 17 2022",
       "architecture": "x64",
       "cacheVariables": { "TAHUA_INSTALL_AFTER_BUILD": "ON" },
       "condition": { "type": "equals", "lhs": "${hostSystemName}", "rhs": "Windows" }
