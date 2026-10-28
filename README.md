@@ -5,6 +5,7 @@ Plugins [FFGL](https://github.com/resolume/ffgl) (effets, sources, mixers) pour 
 | Plugin | Type | ID | Description |
 |---|---|---|---|
 | [Tahua Tint](plugins/Tint/README.md) | Effet | `TE01` | Rotation de teinte, saturation, inversion |
+| [Tahua SliceChase](plugins/SliceChase/README.md) | Effet | `TE02` | Allume les slices de l'Advanced Output là où la source du layer est lumineuse |
 
 ## Structure
 
@@ -15,6 +16,9 @@ scripts/new_plugin.cmake   crée un plugin depuis un gabarit
 cmake/                 build du SDK FFGL et fonction tahua_add_plugin()
 common/include/        en-tête partagé par les plugins
 external/ffgl/         SDK FFGL officiel (submodule)
+external/pugixml/      lecteur XML (submodule, utilisé par SliceChase)
+external/earcut/       triangulation de polygones (submodule, utilisé par SliceChase)
+external/clipper2/     découpage de polygones (submodule, utilisé par SliceChase)
 ```
 
 Le build est entièrement en **CMake**. Le CMake racine ajoute tout seul chaque `plugins/*/` : on n'a jamais besoin de le modifier.
@@ -165,4 +169,4 @@ Il faut un compte Apple Developer payant. Cette étape n'a pas encore été test
 
 ## Licence
 
-[MIT](LICENSE). Le SDK FFGL (`external/ffgl`) est sous licence BSD-3-Clause.
+[MIT](LICENSE). Le SDK FFGL (`external/ffgl`) est sous licence BSD-3-Clause, pugixml (`external/pugixml`) sous MIT, earcut (`external/earcut`) sous ISC et Clipper2 (`external/clipper2`) sous Boost Software License 1.0.
