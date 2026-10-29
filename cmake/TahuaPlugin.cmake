@@ -143,3 +143,29 @@ function(tahua_add_plugin name)
     # Used to stage release packages: cmake --install <build> --config Release --prefix dist/<os>
     install(TARGETS ${name} LIBRARY DESTINATION .)
 endfunction()
+
+# tahua_add_slices(<Name>)
+#
+# Adds common/slices to a plugin: reading Advanced Output presets (pugixml), clipping their
+# masks (Clipper2), triangulating them (earcut), the screen / slice family checkboxes
+# (SliceEffect) and the threshold and fade levels of each slice (ChaseLevels).
+function(tahua_add_slices name)
+    set(_slices "${_tahua_root}/common/slices")
+    set(_external "${_tahua_root}/external")
+    set(_clipper "${_external}/clipper2/CPP/Clipper2Lib")
+    target_sources(${name} PRIVATE
+        "${_slices}/SliceLoader.h" "${_slices}/SliceLoader.cpp"
+        "${_slices}/SliceEffect.h" "${_slices}/SliceEffect.cpp"
+        "${_slices}/ChaseLevels.h" "${_slices}/ChaseLevels.cpp"
+        "${_external}/pugixml/src/pugixml.cpp"
+        "${_clipper}/src/clipper.engine.cpp")
+    target_include_directories(${name} PRIVATE
+        "${_slices}"
+        "${_external}/pugixml/src"
+        "${_external}/earcut/include"
+        "${_clipper}/include")
+    if(MSVC)
+        # C4702 (unreachable code) is raised by the optimizer inside Clipper2's headers.
+        set_source_files_properties("${_slices}/SliceLoader.cpp" PROPERTIES COMPILE_OPTIONS /wd4702)
+    endif()
+endfunction()

@@ -6,6 +6,7 @@ Plugins [FFGL](https://github.com/resolume/ffgl) (effets, sources, mixers) pour 
 |---|---|---|---|
 | [Tahua Tint](plugins/Tint/README.md) | Effet | `TE01` | Rotation de teinte, saturation, inversion |
 | [Tahua SliceChase](plugins/SliceChase/README.md) | Effet | `TE02` | Allume les slices de l'Advanced Output là où la source du layer est lumineuse |
+| [Tahua Stage3D](plugins/Stage3D/README.md) | Effet | `TE03` | Vue 3D en perspective des écrans de l'Advanced Output, texturés par le layer |
 
 ## Structure
 
@@ -15,10 +16,11 @@ templates/             gabarits effect / source / mixer + README de plugin
 scripts/new_plugin.cmake   crée un plugin depuis un gabarit
 cmake/                 build du SDK FFGL et fonction tahua_add_plugin()
 common/include/        en-tête partagé par les plugins
+common/slices/         lecture des presets Advanced Output, cases écrans / familles, chase (SliceChase, Stage3D)
 external/ffgl/         SDK FFGL officiel (submodule)
-external/pugixml/      lecteur XML (submodule, utilisé par SliceChase)
-external/earcut/       triangulation de polygones (submodule, utilisé par SliceChase)
-external/clipper2/     découpage de polygones (submodule, utilisé par SliceChase)
+external/pugixml/      lecteur XML (submodule, utilisé par common/slices)
+external/earcut/       triangulation de polygones (submodule, utilisé par common/slices)
+external/clipper2/     découpage de polygones (submodule, utilisé par common/slices)
 ```
 
 Le build est entièrement en **CMake**. Le CMake racine ajoute tout seul chaque `plugins/*/` : on n'a jamais besoin de le modifier.

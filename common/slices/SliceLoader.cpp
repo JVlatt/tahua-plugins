@@ -133,6 +133,135 @@ bool BuildSlice( const std::vector< Triangle >& triangles, unsigned int seed, Pr
 	return true;
 }
 
+// Projective map of the plane, as a 3x3 matrix applied to (x, y, 1).
+using Matrix3 = std::array< double, 9 >;
+
+Point Apply( const Matrix3& m, const Point& p )
+{
+	double w = m[ 6 ] * p[ 0 ] + m[ 7 ] * p[ 1 ] + m[ 8 ];
+	return { ( m[ 0 ] * p[ 0 ] + m[ 1 ] * p[ 1 ] + m[ 2 ] ) / w, ( m[ 3 ] * p[ 0 ] + m[ 4 ] * p[ 1 ] + m[ 5 ] ) / w };
+}
+
+Matrix3 Multiply( const Matrix3& a, const Matrix3& b )
+{
+	Matrix3 m{};
+	for( int r = 0; r < 3; ++r )
+		for( int c = 0; c < 3; ++c )
+			for( int k = 0; k < 3; ++k )
+				m[ r * 3 + c ] += a[ r * 3 + k ] * b[ k * 3 + c ];
+	return m;
+}
+
+// The adjugate: the inverse up to a scale, which a projective map ignores.
+Matrix3 Adjugate( const Matrix3& m )
+{
+	return { m[ 4 ] * m[ 8 ] - m[ 5 ] * m[ 7 ], m[ 2 ] * m[ 7 ] - m[ 1 ] * m[ 8 ], m[ 1 ] * m[ 5 ] - m[ 2 ] * m[ 4 ],
+		     m[ 5 ] * m[ 6 ] - m[ 3 ] * m[ 8 ], m[ 0 ] * m[ 8 ] - m[ 2 ] * m[ 6 ], m[ 2 ] * m[ 3 ] - m[ 0 ] * m[ 5 ],
+		     m[ 3 ] * m[ 7 ] - m[ 4 ] * m[ 6 ], m[ 1 ] * m[ 6 ] - m[ 0 ] * m[ 7 ], m[ 0 ] * m[ 4 ] - m[ 1 ] * m[ 3 ] };
+}
+
+// Maps the unit square (0,0) (1,0) (1,1) (0,1) to the quad q0 q1 q2 q3 (Heckbert).
+Matrix3 SquareToQuad( const Clipper2Lib::PathD& q )
+{
+	double dx1 = q[ 1 ].x - q[ 2 ].x, dx2 = q[ 3 ].x - q[ 2 ].x, dx3 = q[ 0 ].x - q[ 1 ].x + q[ 2 ].x - q[ 3 ].x;
+	double dy1 = q[ 1 ].y - q[ 2 ].y, dy2 = q[ 3 ].y - q[ 2 ].y, dy3 = q[ 0 ].y - q[ 1 ].y + q[ 2 ].y - q[ 3 ].y;
+	double det = dx1 * dy2 - dx2 * dy1;
+	double g   = det != 0.0 ? ( dx3 * dy2 - dx2 * dy3 ) / det : 0.0;
+	double h   = det != 0.0 ? ( dx1 * dy3 - dx3 * dy1 ) / det : 0.0;
+	return { q[ 1 ].x - q[ 0 ].x + g * q[ 1 ].x, q[ 3 ].x - q[ 0 ].x + h * q[ 3 ].x, q[ 0 ].x,
+		     q[ 1 ].y - q[ 0 ].y + g * q[ 1 ].y, q[ 3 ].y - q[ 0 ].y + h * q[ 3 ].y, q[ 0 ].y,
+		     g, h, 1.0 };
+}
+
+// Where each point of a triangle lands, given where its corners land.
+Point MapInTriangle( const Triangle& from, const Triangle& to, const Point& p )
+{
+	const Point &a = from[ 0 ], &b = from[ 1 ], &c = from[ 2 ];
+	double det = ( b[ 0 ] - a[ 0 ] ) * ( c[ 1 ] - a[ 1 ] ) - ( c[ 0 ] - a[ 0 ] ) * ( b[ 1 ] - a[ 1 ] );
+	if( det == 0.0 )
+		return to[ 0 ];
+	double u = ( ( p[ 0 ] - a[ 0 ] ) * ( c[ 1 ] - a[ 1 ] ) - ( c[ 0 ] - a[ 0 ] ) * ( p[ 1 ] - a[ 1 ] ) ) / det;
+	double v = ( ( b[ 0 ] - a[ 0 ] ) * ( p[ 1 ] - a[ 1 ] ) - ( p[ 0 ] - a[ 0 ] ) * ( b[ 1 ] - a[ 1 ] ) ) / det;
+	return { to[ 0 ][ 0 ] + u * ( to[ 1 ][ 0 ] - to[ 0 ][ 0 ] ) + v * ( to[ 2 ][ 0 ] - to[ 0 ][ 0 ] ),
+		     to[ 0 ][ 1 ] + u * ( to[ 1 ][ 1 ] - to[ 0 ][ 1 ] ) + v * ( to[ 2 ][ 1 ] - to[ 0 ][ 1 ] ) };
+}
+
+struct Sizes
+{
+	double width, height;            // composition, in pixels
+	double outputWidth, outputHeight;// screen output, in pixels
+};
+
+// Appends normalised triangles (as made by Triangulate) to the mesh, with their output
+// position given by map, which works in pixels.
+template< typename Map >
+void AppendMesh( const std::vector< Triangle >& triangles, const Sizes& sizes, Map map, std::vector< float >& mesh )
+{
+	for( const Triangle& t : triangles )
+	{
+		for( const Point& p : t )
+		{
+			Point output = map( Point{ p[ 0 ] * sizes.width, ( 1.0 - p[ 1 ] ) * sizes.height } );
+			mesh.push_back( (float)( output[ 0 ] / sizes.outputWidth ) );
+			mesh.push_back( (float)( 1.0 - output[ 1 ] / sizes.outputHeight ) );
+			mesh.push_back( (float)p[ 0 ] );
+			mesh.push_back( (float)p[ 1 ] );
+		}
+	}
+}
+
+// Visible area clipped to one shape, as normalised triangles.
+std::vector< Triangle > TriangulateClipped( const Clipper2Lib::PathsD& area, const Clipper2Lib::PathsD& clip, const Sizes& sizes )
+{
+	Clipper2Lib::PolyTreeD tree;
+	Clipper2Lib::BooleanOp( Clipper2Lib::ClipType::Intersection, Clipper2Lib::FillRule::NonZero, area, clip, tree );
+	std::vector< Triangle > triangles;
+	for( const auto& outer : tree )
+		Triangulate( *outer, sizes.width, sizes.height, triangles );
+	return triangles;
+}
+
+// Places the visible area (already triangulated, normalised) on the screen's output.
+void BuildMesh( pugi::xml_node layer, const Clipper2Lib::PathsD& area, const std::vector< Triangle >& triangles, const Sizes& sizes, PresetSlice& slice )
+{
+	auto identity = []( const Point& p ) { return p; };
+
+	Clipper2Lib::PathD input  = ReadPoints( layer.child( "InputContour" ).child( "points" ) );
+	Clipper2Lib::PathD output = ReadPoints( layer.child( "OutputContour" ).child( "points" ) );
+	if( input.empty() )
+	{
+		// Slice: its input rect is stretched onto its output rect.
+		input  = ReadPoints( layer.child( "InputRect" ) );
+		output = ReadPoints( layer.child( "OutputRect" ) );
+		if( input.size() != 4 || output.size() != 4 )
+			return AppendMesh( triangles, sizes, identity, slice.mesh );
+		Matrix3 map = Multiply( SquareToQuad( output ), Adjugate( SquareToQuad( input ) ) );
+		return AppendMesh( triangles, sizes, [ & ]( const Point& p ) { return Apply( map, p ); }, slice.mesh );
+	}
+
+	// Polygon: input and output contours have the same points. Each triangle of the input
+	// contour maps affinely onto the matching output triangle.
+	if( input.size() != output.size() || input.size() < 3 )
+		return AppendMesh( triangles, sizes, identity, slice.mesh );
+	std::vector< std::vector< Point > > ring( 1 );
+	for( const Clipper2Lib::PointD& p : input )
+		ring[ 0 ].push_back( { p.x, p.y } );
+	std::vector< uint32_t > indices = mapbox::earcut< uint32_t >( ring );
+	for( size_t t = 0; t + 2 < indices.size(); t += 3 )
+	{
+		Triangle from, to;
+		Clipper2Lib::PathD clip;
+		for( int k = 0; k < 3; ++k )
+		{
+			const uint32_t i = indices[ t + k ];
+			from[ k ]        = { input[ i ].x, input[ i ].y };
+			to[ k ]          = { output[ i ].x, output[ i ].y };
+			clip.push_back( input[ i ] );
+		}
+		AppendMesh( TriangulateClipped( area, { clip }, sizes ), sizes, [ & ]( const Point& p ) { return MapInTriangle( from, to, p ); }, slice.mesh );
+	}
+}
+
 }//End anonymous namespace
 
 bool LoadPreset( const std::string& utf8Path, Preset& preset, std::string& error )
@@ -173,6 +302,17 @@ bool LoadPreset( const std::string& utf8Path, Preset& preset, std::string& error
 	{
 		PresetScreen screen;
 		screen.name = screenNode.attribute( "name" ).as_string();
+
+		// The output device (virtual or a real display) carries the screen's resolution.
+		pugi::xml_node device = screenNode.child( "OutputDevice" ).first_child();
+		Sizes sizes{ width, height, device.attribute( "width" ).as_double( width ), device.attribute( "height" ).as_double( height ) };
+		if( sizes.outputWidth <= 0.0 || sizes.outputHeight <= 0.0 )
+		{
+			sizes.outputWidth  = width;
+			sizes.outputHeight = height;
+		}
+		screen.aspect = (float)( sizes.outputWidth / sizes.outputHeight );
+
 		for( pugi::xml_node layer : screenNode.child( "layers" ).children() )
 		{
 			std::string type = layer.name();
@@ -180,8 +320,9 @@ bool LoadPreset( const std::string& utf8Path, Preset& preset, std::string& error
 				continue;
 
 			// A union with nothing turns the area into a tree of outers and holes.
+			Clipper2Lib::PathsD area = ReadVisibleArea( layer );
 			Clipper2Lib::PolyTreeD tree;
-			Clipper2Lib::BooleanOp( Clipper2Lib::ClipType::Union, Clipper2Lib::FillRule::NonZero, ReadVisibleArea( layer ), {}, tree );
+			Clipper2Lib::BooleanOp( Clipper2Lib::ClipType::Union, Clipper2Lib::FillRule::NonZero, area, {}, tree );
 			std::vector< Triangle > triangles;
 			for( const auto& outer : tree )
 				Triangulate( *outer, width, height, triangles );
@@ -189,7 +330,10 @@ bool LoadPreset( const std::string& utf8Path, Preset& preset, std::string& error
 			PresetSlice slice;
 			slice.family = SliceFamily( ParamValue( layer, "Common", "Name" ).as_string() );
 			if( BuildSlice( triangles, seed++, slice ) )
+			{
+				BuildMesh( layer, area, triangles, sizes, slice );
 				screen.slices.push_back( std::move( slice ) );
+			}
 		}
 		preset.screens.push_back( std::move( screen ) );
 	}
