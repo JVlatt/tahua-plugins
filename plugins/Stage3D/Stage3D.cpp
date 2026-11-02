@@ -32,7 +32,8 @@ void main()
 // One screen: a plane centred on its origin, aspect x 1 before the model matrix places and
 // scales it. Slices sit on it and extrude backwards, towards -z: depth 1 is on the screen
 // (front faces), depth 0 at the extrusion. Slice -1 is the screen's backdrop, just behind the
-// extrusion. In Chase mode, each slice moves from where it is towards its target transform
+// extrusion. A slice's centre carries its family's offset in z, which moves the whole slice
+// forwards or backwards. In Chase mode, each slice moves from where it is towards its target transform
 // (move, turn, scale, in the screen's axes, around the slice's centre) as its level goes to 1.
 const char screenVertexShader[] = R"(
 #version 410 core
@@ -41,7 +42,7 @@ layout( location = 1 ) in vec2 inputPosition;
 layout( location = 2 ) in float slice;
 layout( location = 3 ) in float depth;
 layout( location = 4 ) in float side;
-layout( location = 5 ) in vec2 centre;
+layout( location = 5 ) in vec3 centre;
 uniform mat4 mvp;
 uniform mat4 modelView;
 uniform float aspect;
@@ -71,11 +72,11 @@ mat3 Rotation( vec3 degrees )
 void main()
 {
 	vec2 screen   = vec2( aspect, 1.0 );
-	vec3 position = vec3( ( outputPosition - 0.5 ) * screen, slice < 0.0 ? -extrude - 0.002 : ( depth - 1.0 ) * extrude );
+	vec3 position = vec3( ( outputPosition - 0.5 ) * screen, slice < 0.0 ? -extrude - 0.002 : ( depth - 1.0 ) * extrude + centre.z );
 	if( slice >= 0.0 && mode == 2 )
 	{
 		float level = texelFetch( levels, ivec2( 0, int( slice ) ), 0 ).r;
-		vec3 pivot  = vec3( ( centre - 0.5 ) * screen, 0.0 );
+		vec3 pivot  = vec3( ( centre.xy - 0.5 ) * screen, centre.z );
 		position    = pivot + move * level + Rotation( turn * level ) * ( ( position - pivot ) * mix( 1.0, scale, level ) );
 	}
 	gl_Position  = mvp * vec4( position, 1.0 );
@@ -191,7 +192,7 @@ void main()
 }
 )";
 
-const int FLOATS_PER_VERTEX = 9;// output x, y, input x, y, slice, depth, side, centre x, y
+const int FLOATS_PER_VERTEX = 10;// output x, y, input x, y, slice, depth, side, centre x, y, z
 // --- Column-major 4x4 matrices, as OpenGL expects them ---------------------------------------
 
 struct Vec3
@@ -441,16 +442,8 @@ Stage3D::Stage3D()
 	for( unsigned int i = 0; i < 7; ++i )
 		SetParamDisplayName( firstTotal + i, totalNames[ i ], false );
 
-	// The placement parameters edit the screen picked in Edit Screen. Its elements become the
-	// screen names of the loaded preset; the option keeps MAX_SCREENS entries so that the
-	// quickstart accepts any index the host sends.
-	editScreenIndex = (unsigned int)params.size();
-	std::vector< ParamOption::Option > screens;
-	for( int i = 0; i < MAX_SCREENS; ++i )
-		screens.push_back( { "Screen" + std::to_string( i + 1 ), (float)i } );
-	AddParam( ParamOption::Create( "EditScreen", screens ) );
-	SetParamDisplayName( editScreenIndex, "Edit Screen", false );
-	SetParamElements( editScreenIndex, { "-" }, { 0.0f }, false );
+	// The placement parameters edit the screen picked in Edit Screen.
+	editScreenIndex = AddScreenOption( "EditScreen", "Edit Screen" );
 	firstPlacement = (unsigned int)params.size();
 	AddParam( ParamRange::Create( "PosX", 0.0f, { -1.0f, 1.0f } ) );
 	AddParam( ParamRange::Create( "PosY", 0.0f, { -1.0f, 1.0f } ) );
@@ -472,7 +465,7 @@ Stage3D::Stage3D()
 	AddParam( placementsText );
 	SetParamVisibility( placementsIndex, false, false );
 
-	AddSelectionParams();
+	AddSelectionParams( true );// each family's z offset, in screen heights, on each screen
 }
 
 FFResult Stage3D::Init()
@@ -490,35 +483,13 @@ void Stage3D::Update()
 {
 	SelectionUpdate selection = UpdateSelection();
 	if( selection.presetLoaded )
-		UpdateScreenList();
+		ShowScreenNames( editScreenIndex );
 	UpdatePlacement( selection.presetLoaded );
 	UpdateModeVisibility();
 	if( !selection.changed )
 		return;
 	ReleaseScreens();
 	UploadScreens();
-}
-
-void Stage3D::UpdateScreenList()
-{
-	std::vector< std::string > names;
-	std::vector< float > values;
-	for( size_t i = 0; i < preset.screens.size() && i < MAX_SCREENS; ++i )
-	{
-		names.push_back( preset.screens[ i ].name );
-		values.push_back( (float)i );
-	}
-	if( names.empty() )
-	{
-		names.push_back( "-" );
-		values.push_back( 0.0f );
-	}
-	SetParamElements( editScreenIndex, names, values, true );
-	if( params[ editScreenIndex ]->GetValue() >= (float)names.size() )
-	{
-		params[ editScreenIndex ]->SetValue( 0.0f );
-		RaiseParamEvent( editScreenIndex, FF_EVENT_FLAG_VALUE );
-	}
 }
 
 void Stage3D::UpdatePlacement( bool reload )
@@ -825,11 +796,13 @@ void Stage3D::UploadScreens()
 	std::vector< float > vertices;
 	std::vector< float > samples;
 	auto vertexCount = [ & ]() { return (GLint)( vertices.size() / FLOATS_PER_VERTEX ); };
-	// Mesh vertex i of a slice (4 floats: output x, y, input x, y) at a depth, with its centre.
+	// Mesh vertex i of a slice (4 floats: output x, y, input x, y) at a depth, with its centre
+	// and its family's offset.
 	std::pair< float, float > centre;// of the slice being added
+	float familyOffset = 0.0f;       // same
 	auto addVertex = [ & ]( const std::vector< float >& mesh, size_t i, float depth, float side ) {
 		vertices.insert( vertices.end(), mesh.begin() + i * 4, mesh.begin() + i * 4 + 4 );
-		vertices.insert( vertices.end(), { (float)sliceCount, depth, side, centre.first, centre.second } );
+		vertices.insert( vertices.end(), { (float)sliceCount, depth, side, centre.first, centre.second, familyOffset } );
 	};
 
 	for( size_t s = 0; s < preset.screens.size(); ++s )
@@ -841,16 +814,17 @@ void Stage3D::UploadScreens()
 		// The backdrop: two triangles over the whole screen.
 		const float corners[] = { 0, 0, 1, 0, 1, 1, 0, 0, 1, 1, 0, 1 };
 		for( int i = 0; i < 12; i += 2 )
-			vertices.insert( vertices.end(), { corners[ i ], corners[ i + 1 ], 0.0f, 0.0f, -1.0f, 0.0f, 0.0f, 0.5f, 0.5f } );
+			vertices.insert( vertices.end(), { corners[ i ], corners[ i + 1 ], 0.0f, 0.0f, -1.0f, 0.0f, 0.0f, 0.5f, 0.5f, 0.0f } );
 
 		std::vector< const PresetSlice* > slices;
 		for( const PresetSlice& slice : screen.slices )
-			if( IsSelected( slice ) )
+			if( IsSelected( screen, slice ) )
 				slices.push_back( &slice );
 		int firstSlice = sliceCount;
 		for( const PresetSlice* slice : slices )
 		{
 			centre = CentreOf( slice->mesh );
+			familyOffset = FamilyOffset( screen, *slice );
 			for( size_t i = 0; i < slice->mesh.size() / 4; ++i )
 				addVertex( slice->mesh, i, 1.0f, 0.0f );
 			samples.insert( samples.end(), slice->samples.begin(), slice->samples.end() );
@@ -863,6 +837,7 @@ void Stage3D::UploadScreens()
 		for( const PresetSlice* slice : slices )
 		{
 			centre = CentreOf( slice->mesh );
+			familyOffset = FamilyOffset( screen, *slice );
 			const std::vector< float >& mesh = slice->mesh;
 			size_t count                     = mesh.size() / 4;
 			std::map< std::pair< VertexKey, VertexKey >, int > edgeUses;
@@ -903,7 +878,7 @@ void Stage3D::UploadScreens()
 	ScopedVAOBinding vaoBinding( vao );
 	ScopedVBOBinding vboBinding( vbo );
 	glBufferData( GL_ARRAY_BUFFER, vertices.size() * sizeof( float ), vertices.data(), GL_STATIC_DRAW );
-	const GLint sizes[] = { 2, 2, 1, 1, 1, 2 };
+	const GLint sizes[] = { 2, 2, 1, 1, 1, 3 };
 	size_t offset       = 0;
 	for( GLuint attribute = 0; attribute < 6; ++attribute )
 	{

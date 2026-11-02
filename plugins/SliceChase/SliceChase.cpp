@@ -82,7 +82,7 @@ void SliceChase::Update()
 		if( !IsSelected( screen ) )
 			continue;
 		for( const PresetSlice& slice : screen.slices )
-			if( IsSelected( slice ) )
+			if( IsSelected( screen, slice ) )
 				AppendSlice( slice, geometry );
 	}
 	ReleaseSlices();

@@ -20,7 +20,8 @@ Un plugin FFGL n'a pas accès aux slices de Resolume. On lui donne donc le prese
 | Fade Out | Range | 0 – 10 s | 0 | Durée pour passer d'allumée à éteinte |
 | Color | Couleur | | blanc | Couleur des slices allumées ; le reste est transparent |
 | Screens | Cases à cocher | | toutes cochées | Une case par écran du preset chargé (32 au maximum) |
-| Slices | Cases à cocher | | toutes cochées | Une case par famille de slices présente dans les écrans cochés (64 au maximum) |
+| Slices › Screen | Liste | | premier écran | Écran dont les cases ci-dessous montrent les familles. La liste porte les noms des écrans du preset |
+| Slices | Cases à cocher | | toutes cochées | Une case par famille de slices de l'écran choisi dans Screen (64 au maximum) : la décocher éteint cette famille sur cet écran seulement |
 
 ### Écrans et familles
 
@@ -28,9 +29,11 @@ Les cases sont construites à partir du XML chargé : elles portent les noms de 
 
 Une **famille** regroupe les slices dont le nom ne diffère que par le numéro final : `METAL_1` … `METAL_40` donnent `METAL`, `Wing 3` donne `Wing`, `EYE-02` donne `EYE`. Un nom sans numéro final forme sa propre famille.
 
+Les familles se choisissent **écran par écran** : la liste Screen du panneau Slices choisit l'écran, et les cases montrent ses familles. Une famille présente sur plusieurs écrans peut être allumée sur l'un et éteinte sur l'autre. Une composition enregistrée avant ce choix par écran garde ses familles décochées éteintes sur tous les écrans ; recocher une de ces familles sur un écran la rallume sur cet écran seulement.
+
 Ce qui est décoché est enregistré **par nom** dans la composition, pas par position. Les choix restent valables si le preset est réorganisé. Avec un autre preset, les noms qui n'y existent pas sont ignorés.
 
-Au-delà de 32 écrans ou 64 familles, les suivants n'ont pas de case et restent toujours actifs ; un message l'indique dans le log de Resolume.
+Au-delà de 32 écrans, ou de 64 familles sur un écran, les suivants n'ont pas de case et restent toujours actifs ; un message l'indique dans le log de Resolume.
 
 ## Fonctionnement
 

@@ -33,7 +33,6 @@ private:
 		GLint end;
 	};
 
-	void UpdateScreenList();
 	void UpdatePlacement( bool reload );
 	void UpdateModeVisibility();
 	Placement PlacementOf( int screen ) const;

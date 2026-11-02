@@ -48,7 +48,9 @@ Comme [SliceChase](../SliceChase/README.md), l'effet lit le preset Advanced Outp
 | Rot X, Rot Y, Rot Z | Range | -180 – 180° | 0 | Rotation de l'écran (appliquée dans l'ordre Z, X, Y) |
 | Size | Range | 0.05 – 10 | 1 | Hauteur de l'écran ; la largeur suit le ratio de sa sortie |
 | Screens | Cases à cocher | | toutes cochées | Une case par écran du preset chargé (32 au maximum) |
-| Slices | Cases à cocher | | toutes cochées | Une case par famille de slices présente dans les écrans cochés (64 au maximum) |
+| Slices › Screen | Liste | | premier écran | Écran dont les cases ci-dessous montrent les familles. La liste porte les noms des écrans du preset |
+| Slices | Cases à cocher | | toutes cochées | Une case par famille de slices de l'écran choisi dans Screen (64 au maximum) : la décocher éteint cette famille sur cet écran seulement. Voir [SliceChase](../SliceChase/README.md#écrans-et-familles) |
+| *famille* Z | Range | -1 – 1 | 0 | Sous chaque case : avance (positif) ou recule la famille sur l'écran choisi, en hauteurs d'écran, dans l'axe Z de l'écran. Enregistré par nom d'écran et de famille ; le mouvement Chase part de cette position |
 
 ### Modes
 
