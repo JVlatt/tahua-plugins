@@ -109,6 +109,9 @@ uniform vec4 baseColor;
 uniform vec3 emissive;// the layer's glow, per channel
 uniform float bounce;// 0 when the glow lights nothing
 uniform float spread;// blur radius, in layer heights
+uniform float specular;
+uniform float glossiness;
+uniform float fresnel;
 in vec2 uv;
 in vec2 spillUV;
 in vec3 viewPosition;
@@ -164,8 +167,16 @@ void main()
 		}
 		received += bounce * emissive * sum / 10.0;
 	}
-	vec4 layer = texture( inputTexture, uv );
-	fragColor  = vec4( baseColor.rgb * baseColor.a * received + layer.rgb * emissive, baseColor.a + layer.a * ( 1.0 - baseColor.a ) );
+	vec4 layer   = texture( inputTexture, uv );
+	vec4 surface = vec4( baseColor.rgb * baseColor.a * received + layer.rgb * emissive, baseColor.a + layer.a * ( 1.0 - baseColor.a ) );
+
+	// Glass. Seen edge-on, the face turns into a mirror of the light it receives, opaque.
+	vec3 toEye = -normalize( viewPosition );
+	surface    = mix( surface, vec4( received, 1.0 ), fresnel * pow( 1.0 - max( dot( normal, toEye ), 0.0 ), 3.0 ) );
+	// The point light's highlight, as opaque as it is bright.
+	vec3 halfway    = normalize( toLight / lightDistance + toEye );
+	float highlight = specular * lightIntensity * pow( max( dot( normal, halfway ), 0.0 ), exp2( 1.0 + 10.0 * glossiness ) ) / ( 1.0 + lightDistance * lightDistance );
+	fragColor       = vec4( surface.rgb + highlight, min( surface.a + highlight, 1.0 ) );
 }
 )";
 
@@ -402,6 +413,11 @@ Stage3D::Stage3D()
 	SetParamDisplayName( materialIndex + 5, "Emissive Color", false );
 	AddParam( ParamRange::Create( "Bounce", 2.0f, { 0.0f, 10.0f } ) );
 	AddParam( ParamRange::Create( "Spread", 0.05f, { 0.0f, 0.5f } ) );// how far the glow spills, in layer heights
+	// Glass: a highlight of the point light (Specular, sharper with Glossiness), and faces that
+	// turn opaque and reflect the light they receive as they are seen edge-on (Fresnel).
+	AddParam( ParamRange::Create( "Specular", 0.0f, { 0.0f, 5.0f } ) );
+	AddParam( ParamRange::Create( "Glossiness", 0.5f, { 0.0f, 1.0f } ) );
+	AddParam( ParamRange::Create( "Fresnel", 0.0f, { 0.0f, 1.0f } ) );
 	for( unsigned int i = materialIndex; i < params.size(); ++i )
 		SetParamGroup( i, "Material" );
 
@@ -532,7 +548,7 @@ void Stage3D::UpdateModeVisibility()
 		SetParamVisibility( i, mode == MODE_CHASE, true );
 	for( unsigned int i = colorIndex; i < colorIndex + 4; ++i )
 		SetParamVisibility( i, mode != MODE_TEXTURE, true );
-	for( unsigned int i = materialIndex; i < materialIndex + 11; ++i )
+	for( unsigned int i = materialIndex; i < materialIndex + 14; ++i )
 		SetParamVisibility( i, mode == MODE_TEXTURE, true );
 }
 
@@ -705,6 +721,9 @@ FFResult Stage3D::Render( ProcessOpenGLStruct* inputTextures )
 		screenShader.Set( "emissive", emission[ 0 ] * emissive, emission[ 1 ] * emissive, emission[ 2 ] * emissive );
 		screenShader.Set( "bounce", spilled ? bounce : 0.0f );
 		screenShader.Set( "spread", GetParam( "Spread" )->GetValue() );
+		screenShader.Set( "specular", GetParam( "Specular" )->GetValue() );
+		screenShader.Set( "glossiness", GetParam( "Glossiness" )->GetValue() );
+		screenShader.Set( "fresnel", GetParam( "Fresnel" )->GetValue() );
 		screenShader.Set( "extrude", extrude );
 		screenShader.Set( "maxUV", maxCoords.s, maxCoords.t );
 		screenShader.Set( "move", GetParam( "MoveX" )->GetValue(), GetParam( "MoveY" )->GetValue(), GetParam( "MoveZ" )->GetValue() );
@@ -719,17 +738,66 @@ FFResult Stage3D::Render( ProcessOpenGLStruct* inputTextures )
 			glUniformMatrix4fv( modelView, 1, GL_FALSE, modelViews[ i ].m );
 			screenShader.Set( "aspect", preset.screens[ draws[ i ].screen ].aspect );
 		};
-		for( size_t i = 0; i < draws.size(); ++i )
+		float opacity = GetParam( mode == MODE_TEXTURE ? "BaseColor_alpha" : "Color_alpha" )->GetValue();
+		if( opacity >= 1.0f )
 		{
-			setScreen( i );
-			GLint first = draws[ i ].first + 6, end = extrude > 0.0f ? draws[ i ].end : draws[ i ].sidesFirst;
-			glDrawArrays( GL_TRIANGLES, first, end - first );
+			for( size_t i = 0; i < draws.size(); ++i )
+			{
+				setScreen( i );
+				GLint first = draws[ i ].first + 6, end = extrude > 0.0f ? draws[ i ].end : draws[ i ].sidesFirst;
+				glDrawArrays( GL_TRIANGLES, first, end - first );
+			}
+			glDepthMask( GL_FALSE );
+			for( size_t i : order )
+			{
+				setScreen( i );
+				glDrawArrays( GL_TRIANGLES, draws[ i ].first, 6 );
+			}
 		}
-		glDepthMask( GL_FALSE );
-		for( size_t i : order )
+		else
 		{
-			setScreen( i );
-			glDrawArrays( GL_TRIANGLES, draws[ i ].first, 6 );
+			// See-through slices must not hide what is behind them: they and the backdrops are all
+			// drawn from the farthest to the nearest, sorted by their centres, without writing depth.
+			// Within a slice, its face away from the camera goes first. Chase moves are not sorted.
+			struct Item
+			{
+				float depth;
+				int slice;// in sliceDraws, or -1 for the backdrop of draw
+				size_t draw;
+			};
+			std::vector< Item > items;
+			for( size_t i = 0; i < draws.size(); ++i )
+				items.push_back( { modelViews[ i ].Transform( { 0.0f, 0.0f, -extrude - 0.002f } ).z, -1, i } );
+			for( size_t s = 0; s < sliceDraws.size(); ++s )
+			{
+				const float* c = sliceDraws[ s ].centre;
+				items.push_back( { modelViews[ sliceDraws[ s ].draw ].Transform( { c[ 0 ], c[ 1 ], c[ 2 ] - extrude * 0.5f } ).z, (int)s, (size_t)sliceDraws[ s ].draw } );
+			}
+			std::sort( items.begin(), items.end(), []( const Item& a, const Item& b ) { return a.depth < b.depth; } );
+
+			glDepthMask( GL_FALSE );
+			for( const Item& item : items )
+			{
+				setScreen( item.draw );
+				if( item.slice < 0 )
+				{
+					glDrawArrays( GL_TRIANGLES, draws[ item.draw ].first, 6 );
+					continue;
+				}
+				const SliceDraw& slice = sliceDraws[ item.slice ];
+				if( extrude <= 0.0f )
+				{
+					glDrawArrays( GL_TRIANGLES, slice.frontFirst, slice.frontEnd - slice.frontFirst );
+					continue;
+				}
+				const float* c = slice.centre;
+				bool fromFront = modelViews[ item.draw ].Transform( { c[ 0 ], c[ 1 ], c[ 2 ] } ).z > modelViews[ item.draw ].Transform( { c[ 0 ], c[ 1 ], c[ 2 ] - extrude } ).z;
+				GLint farFirst = fromFront ? slice.backFirst : slice.frontFirst, farEnd = fromFront ? slice.backEnd : slice.frontEnd;
+				GLint nearFirst = fromFront ? slice.frontFirst : slice.backFirst, nearEnd = fromFront ? slice.frontEnd : slice.backEnd;
+				glDrawArrays( GL_TRIANGLES, farFirst, farEnd - farFirst );
+				glDrawArrays( GL_TRIANGLES, slice.sidesFirst, slice.backFirst - slice.sidesFirst );
+				glDrawArrays( GL_TRIANGLES, nearFirst, nearEnd - nearFirst );
+			}
 		}
 		glDepthMask( GL_TRUE );
 
@@ -821,12 +889,19 @@ void Stage3D::UploadScreens()
 			if( IsSelected( screen, slice ) )
 				slices.push_back( &slice );
 		int firstSlice = sliceCount;
+		size_t firstSliceDraw = sliceDraws.size();
 		for( const PresetSlice* slice : slices )
 		{
 			centre = CentreOf( slice->mesh );
 			familyOffset = FamilyOffset( screen, *slice );
+			SliceDraw sliceDraw{ (int)draws.size(), vertexCount() };
 			for( size_t i = 0; i < slice->mesh.size() / 4; ++i )
 				addVertex( slice->mesh, i, 1.0f, 0.0f );
+			sliceDraw.frontEnd = vertexCount();
+			sliceDraw.centre[ 0 ] = ( centre.first - 0.5f ) * screen.aspect;
+			sliceDraw.centre[ 1 ] = centre.second - 0.5f;
+			sliceDraw.centre[ 2 ] = familyOffset;
+			sliceDraws.push_back( sliceDraw );
 			samples.insert( samples.end(), slice->samples.begin(), slice->samples.end() );
 			++sliceCount;
 		}
@@ -834,8 +909,11 @@ void Stage3D::UploadScreens()
 		// Sides along the outline (the edges that belong to a single triangle), and back faces.
 		draw.sidesFirst = vertexCount();
 		sliceCount      = firstSlice;
-		for( const PresetSlice* slice : slices )
+		for( size_t k = 0; k < slices.size(); ++k )
 		{
+			const PresetSlice* slice = slices[ k ];
+			SliceDraw& sliceDraw     = sliceDraws[ firstSliceDraw + k ];
+			sliceDraw.sidesFirst     = vertexCount();
 			centre = CentreOf( slice->mesh );
 			familyOffset = FamilyOffset( screen, *slice );
 			const std::vector< float >& mesh = slice->mesh;
@@ -861,8 +939,10 @@ void Stage3D::UploadScreens()
 					addVertex( mesh, b, 1.0f, 1.0f );
 					addVertex( mesh, a, 1.0f, 1.0f );
 				}
+			sliceDraw.backFirst = vertexCount();
 			for( size_t i = 0; i < count; ++i )
 				addVertex( mesh, i, 0.0f, 1.0f );
+			sliceDraw.backEnd = vertexCount();
 			++sliceCount;
 		}
 		draw.end = vertexCount();
@@ -896,4 +976,5 @@ void Stage3D::ReleaseScreens()
 	vao = vbo  = 0;
 	sliceCount = 0;
 	draws.clear();
+	sliceDraws.clear();
 }

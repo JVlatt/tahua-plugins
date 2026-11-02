@@ -32,6 +32,15 @@ private:
 		GLint sidesFirst;
 		GLint end;
 	};
+	// One slice's vertices, for drawing see-through slices one by one: its front faces, its sides,
+	// then its back faces up to backEnd. centre is where it is sorted from, on its screen.
+	struct SliceDraw
+	{
+		int draw;// index in draws
+		GLint frontFirst, frontEnd;
+		GLint sidesFirst, backFirst, backEnd;
+		float centre[ 3 ];
+	};
 
 	void UpdatePlacement( bool reload );
 	void UpdateModeVisibility();
@@ -44,7 +53,7 @@ private:
 	unsigned int modeIndex       = 0;
 	unsigned int thresholdIndex  = 0;
 	unsigned int colorIndex      = 0;
-	unsigned int materialIndex   = 0;// Base Color (4), Emissive, Emissive Color (4), Bounce, Spread
+	unsigned int materialIndex   = 0;// Base Color (4), Emissive, Emissive Color (4), Bounce, Spread, Specular, Glossiness, Fresnel
 	unsigned int editScreenIndex = 0;
 	unsigned int firstPlacement  = 0;// X, Y, Z, Rot X, Rot Y, Rot Z, Size
 	unsigned int placementsIndex = 0;
@@ -59,6 +68,7 @@ private:
 	ffglex::FFGLShader screenShader;
 	ffglex::FFGLFBO scene;// with a depth buffer, which the host's target lacks; copied to it
 	std::vector< ScreenDraw > draws;
+	std::vector< SliceDraw > sliceDraws;
 	ffglex::FFGLShader spillShader;
 	ffglex::FFGLFBO spill;// a mipmapped copy of the layer: its glow, blurred, lights the slices
 	GLuint vao     = 0;

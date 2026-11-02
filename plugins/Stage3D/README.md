@@ -30,6 +30,9 @@ Comme [SliceChase](../SliceChase/README.md), l'effet lit le preset Advanced Outp
 | Emissive Color | Couleur | | blanc | *Texture* : teinte de la lueur, et de la lumière qu'elle projette. Son alpha l'atténue comme Emissive |
 | Bounce | Range | 0 – 10 | 2 | *Texture* : force de la lumière que la lueur projette sur la matière autour d'elle (faces avant voisines, côtés extrudés). 0 la coupe (et son coût) |
 | Spread | Range | 0 – 0.5 | 0.05 | *Texture* : distance jusqu'où la lueur éclaire, en hauteurs du layer |
+| Specular | Range | 0 – 5 | 0 | *Texture* : reflet de la lumière ponctuelle sur la matière, opaque là où il brille. Sans effet tant que l'Intensity de la lumière est à 0 |
+| Glossiness | Range | 0 – 1 | 0.5 | *Texture* : netteté du reflet : 0 large et diffus, 1 petit et précis |
+| Fresnel | Range | 0 – 1 | 0 | *Texture* : vues de biais, les faces deviennent opaques et renvoient la lumière qu'elles reçoivent (éclairage de base, lumière ponctuelle, lueur), comme le verre sur ses bords. Pour du verre : alpha de Base Color bas, Fresnel et Specular montés, lumière allumée |
 | **Light** | | | | |
 | X, Y, Z | Range | -2 – 2 | 0, 0.5, 1 | Position de la lumière ponctuelle dans la scène (repère de la scène, pas affecté par Total) |
 | Intensity | Range | 0 – 5 | 0 | Puissance de la lumière, ajoutée à l'éclairage de base ; elle diminue avec le carré de la distance. 0 l'éteint |
@@ -71,6 +74,7 @@ Les réglages de placement par écran ne sont pas animables : ils éditent l'éc
 - Les masks découpent les formes comme dans SliceChase.
 - Chaque écran a les proportions de sa sortie (taille de l'Output Device virtuel ou de l'écran physique dans le XML).
 - Un tampon de profondeur ordonne les slices et leurs volumes ; les fonds gris, semi-transparents, sont dessinés ensuite, du plus loin au plus proche.
+- Quand les slices sont transparentes (alpha de Base Color en *Texture*, de Color sinon, sous 1), slices et fonds sont tous dessinés du plus loin au plus proche, triés par leur centre, pour que chacun laisse voir ce qui est derrière lui. Deux slices qui se croisent, ou les déplacements du mode Chase, peuvent encore s'afficher dans le mauvais ordre.
 
 ## Compatibilité
 
@@ -79,6 +83,10 @@ Les réglages de placement par écran ne sont pas animables : ils éditent l'éc
 - macOS 10.15 ou plus récent, Intel et Apple Silicon (binaire universel)
 
 ## Notes de version
+
+### 1.2 — 2026-11-02
+- Mode Texture : effet verre, avec le reflet de la lumière ponctuelle (Specular, Glossiness) et des faces qui deviennent réfléchissantes vues de biais (Fresnel).
+- Slices transparentes dessinées du plus loin au plus proche : elles ne cachent plus celles qui sont derrière.
 
 ### 1.1 — 2026-11-02
 - Mode Texture : matière Base Color pour les slices, layer émissif par-dessus (Emissive, Emissive Color), et lueur qui éclaire la matière autour d'elle (Bounce, Spread).
