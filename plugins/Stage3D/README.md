@@ -80,5 +80,9 @@ Les réglages de placement par écran ne sont pas animables : ils éditent l'éc
 
 ## Notes de version
 
+### 1.1 — 2026-11-02
+- Mode Texture : matière Base Color pour les slices, layer émissif par-dessus (Emissive, Emissive Color), et lueur qui éclaire la matière autour d'elle (Bounce, Spread).
+- Familles de slices choisies par écran, et décalage en Z par famille.
+
 ### 1.0 — 2026-10-28
 - Première version : écrans de l'Advanced Output placés en 3D, slices et polygons à leur position de sortie, modes Texture / Color / Chase, caméra en orbite fixe autour de l'origine, extrusion des slices, sélection des écrans et familles comme SliceChase.

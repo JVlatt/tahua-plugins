@@ -59,5 +59,8 @@ Les coordonnées sont normalisées par la taille de composition enregistrée dan
 
 ## Notes de version
 
+### 1.1 — 2026-11-02
+- Familles de slices choisies par écran : une liste Screen dans le panneau Slices, et les cases à cocher n'agissent que sur l'écran choisi.
+
 ### 1.0 — 2026-10-27
 - Première version : slices et polygons lus depuis un preset Advanced Output, découpage par les masks, sélection par cases à cocher des écrans et des familles de slices, seuil, fade in / fade out, couleur.
