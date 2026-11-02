@@ -445,7 +445,7 @@ Stage3D::Stage3D()
 	for( unsigned int i = firstCamera; i < params.size(); ++i )
 		SetParamGroup( i, "Camera" );
 
-	// Moves, turns and scales all the screens together, around the origin.
+	// Moves, turns and scales all the screens together, around the centre of their bounds.
 	unsigned int firstTotal = (unsigned int)params.size();
 	AddParam( ParamRange::Create( "TotalX", 0.0f, { -1.0f, 1.0f } ) );
 	AddParam( ParamRange::Create( "TotalY", 0.0f, { -1.0f, 1.0f } ) );
@@ -626,17 +626,44 @@ FFResult Stage3D::Render( ProcessOpenGLStruct* inputTextures )
 	float zNear       = std::max( 0.05f, dist - 50.0f ), zFar = dist + 50.0f;
 	Mat4 projection   = flat ? Orthographic( halfHeight * aspect, halfHeight, zNear, zFar ) : Perspective( fov, aspect, zNear, zFar );
 
-	auto total = [ this ]( const char* name ) { return GetParam( name )->GetValue(); };
-	float totalSize = total( "TotalSize" );
-	Mat4 world      = view * Translate( total( "TotalX" ), total( "TotalY" ), total( "TotalZ" ) ) * Rotate( 1, total( "TotalRotY" ) ) *
-	             Rotate( 0, total( "TotalRotX" ) ) * Rotate( 2, total( "TotalRotZ" ) ) * Scale( totalSize, totalSize, totalSize );
-
-	std::vector< Mat4 > modelViews;
+	// The bounds of everything drawn, as placed: the visible backdrops and the slices, with their
+	// family offset and extrusion, but not their Chase moves.
+	float extrude = GetParam( "Extrude" )->GetValue();
+	std::vector< Mat4 > models;
+	Vec3 low = { 1e9f, 1e9f, 1e9f }, high = { -1e9f, -1e9f, -1e9f };
+	auto addBox = [ & ]( const Mat4& model, float x0, float y0, float x1, float y1, float z0, float z1 ) {
+		for( int corner = 0; corner < 8; ++corner )
+		{
+			Vec3 c = model.Transform( { corner & 1 ? x1 : x0, corner & 2 ? y1 : y0, corner & 4 ? z1 : z0 } );
+			low    = { std::min( low.x, c.x ), std::min( low.y, c.y ), std::min( low.z, c.z ) };
+			high   = { std::max( high.x, c.x ), std::max( high.y, c.y ), std::max( high.z, c.z ) };
+		}
+	};
+	bool backdrops = GetParam( "Backdrop" )->GetValue() > 0.0f;
 	for( const ScreenDraw& draw : draws )
 	{
 		Placement p = PlacementOf( draw.screen );
-		modelViews.push_back( world * Translate( p.x, p.y, p.z ) * Rotate( 1, p.rotY ) * Rotate( 0, p.rotX ) * Rotate( 2, p.rotZ ) * Scale( p.size, p.size, p.size ) );
+		models.push_back( Translate( p.x, p.y, p.z ) * Rotate( 1, p.rotY ) * Rotate( 0, p.rotX ) * Rotate( 2, p.rotZ ) * Scale( p.size, p.size, p.size ) );
+		float halfWidth = preset.screens[ draw.screen ].aspect * 0.5f;
+		if( backdrops )
+			addBox( models.back(), -halfWidth, -0.5f, halfWidth, 0.5f, -extrude - 0.002f, -extrude - 0.002f );
 	}
+	for( const SliceDraw& s : sliceDraws )
+		addBox( models[ s.draw ], s.low[ 0 ], s.low[ 1 ], s.high[ 0 ], s.high[ 1 ], s.centre[ 2 ] - extrude, s.centre[ 2 ] );
+	if( low.x > high.x )
+		low = high = { 0.0f, 0.0f, 0.0f };
+
+	// Moves, turns and scales all the screens together, around the centre of their bounds.
+	auto total = [ this ]( const char* name ) { return GetParam( name )->GetValue(); };
+	float totalSize = total( "TotalSize" );
+	Vec3 pivot      = { ( low.x + high.x ) * 0.5f, ( low.y + high.y ) * 0.5f, ( low.z + high.z ) * 0.5f };
+	Mat4 world      = view * Translate( pivot.x + total( "TotalX" ), pivot.y + total( "TotalY" ), pivot.z + total( "TotalZ" ) ) *
+	             Rotate( 1, total( "TotalRotY" ) ) * Rotate( 0, total( "TotalRotX" ) ) * Rotate( 2, total( "TotalRotZ" ) ) *
+	             Scale( totalSize, totalSize, totalSize ) * Translate( -pivot.x, -pivot.y, -pivot.z );
+
+	std::vector< Mat4 > modelViews;
+	for( const Mat4& model : models )
+		modelViews.push_back( world * model );
 	// The see-through backdrops go last, from the farthest to the nearest.
 	std::vector< size_t > order( draws.size() );
 	std::vector< float > depth( draws.size() );
@@ -659,7 +686,6 @@ FFResult Stage3D::Render( ProcessOpenGLStruct* inputTextures )
 	hueColor( "BaseColor", base );
 	hueColor( "EmissiveColor", emission );
 	FFGLTexCoords maxCoords = GetMaxGLTexCoords( input );
-	float extrude           = GetParam( "Extrude" )->GetValue();
 
 	// Texture mode: the layer copied without its padding, and mipmapped, for its glow to spill.
 	float bounce = GetParam( "Bounce" )->GetValue();
@@ -901,6 +927,16 @@ void Stage3D::UploadScreens()
 			sliceDraw.centre[ 0 ] = ( centre.first - 0.5f ) * screen.aspect;
 			sliceDraw.centre[ 1 ] = centre.second - 0.5f;
 			sliceDraw.centre[ 2 ] = familyOffset;
+			sliceDraw.low[ 0 ] = sliceDraw.low[ 1 ] = 1e9f;
+			sliceDraw.high[ 0 ] = sliceDraw.high[ 1 ] = -1e9f;
+			for( size_t i = 0; i < slice->mesh.size(); i += 4 )
+			{
+				float x = ( slice->mesh[ i ] - 0.5f ) * screen.aspect, y = slice->mesh[ i + 1 ] - 0.5f;
+				sliceDraw.low[ 0 ]  = std::min( sliceDraw.low[ 0 ], x );
+				sliceDraw.low[ 1 ]  = std::min( sliceDraw.low[ 1 ], y );
+				sliceDraw.high[ 0 ] = std::max( sliceDraw.high[ 0 ], x );
+				sliceDraw.high[ 1 ] = std::max( sliceDraw.high[ 1 ], y );
+			}
 			sliceDraws.push_back( sliceDraw );
 			samples.insert( samples.end(), slice->samples.begin(), slice->samples.end() );
 			++sliceCount;

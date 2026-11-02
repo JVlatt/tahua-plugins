@@ -44,8 +44,8 @@ Comme [SliceChase](../SliceChase/README.md), l'effet lit le preset Advanced Outp
 | Perspective | Range | 0 – 1 | 0.5 | 0 = vue plate (orthographique), 1 = perspective forte (champ de 90°). La caméra avance ou recule pour garder le cadrage : seul l'effet de profondeur change |
 | **Placement** | | | | |
 | Total X, Y, Z | Range | -1 – 1 | 0 | Déplace tous les écrans ensemble, en plus de leur placement propre |
-| Total Rot X, Y, Z | Range | -180 – 180° | 0 | Tourne tous les écrans ensemble autour de l'origine (ordre Z, X, Y) |
-| Total Size | Range | 0.05 – 10 | 1 | Agrandit ou réduit tout l'ensemble autour de l'origine |
+| Total Rot X, Y, Z | Range | -180 – 180° | 0 | Tourne tous les écrans ensemble autour du centre de l'ensemble (le milieu de la boîte qui englobe les slices, avec leur décalage Z et leur extrusion, et les backdrops visibles, sans les mouvements du Chase ; ordre Z, X, Y) |
+| Total Size | Range | 0.05 – 10 | 1 | Agrandit ou réduit tout l'ensemble autour de son centre |
 | Edit Screen | Liste | | | Écran que modifient les réglages ci-dessous. La liste porte les noms des écrans du preset |
 | X, Y, Z | Range | -1 – 1 | | Position du centre de l'écran, sur son plan d'origine (la face avant des slices), quelle que soit l'extrusion. Y vers le haut |
 | Rot X, Rot Y, Rot Z | Range | -180 – 180° | 0 | Rotation de l'écran (appliquée dans l'ordre Z, X, Y) |
@@ -83,6 +83,9 @@ Les réglages de placement par écran ne sont pas animables : ils éditent l'éc
 - macOS 10.15 ou plus récent, Intel et Apple Silicon (binaire universel)
 
 ## Notes de version
+
+### 1.3 — 2026-11-02
+- Total Rot et Total Size tournent et agrandissent l'ensemble autour de son centre (slices avec leur décalage Z et leur extrusion, backdrops visibles), et non plus autour de l'origine de la scène.
 
 ### 1.2 — 2026-11-02
 - Mode Texture : effet verre, avec le reflet de la lumière ponctuelle (Specular, Glossiness) et des faces qui deviennent réfléchissantes vues de biais (Fresnel).

@@ -33,13 +33,15 @@ private:
 		GLint end;
 	};
 	// One slice's vertices, for drawing see-through slices one by one: its front faces, its sides,
-	// then its back faces up to backEnd. centre is where it is sorted from, on its screen.
+	// then its back faces up to backEnd. centre is where it is sorted from, on its screen; low and
+	// high bound its front face (x, y), on its screen.
 	struct SliceDraw
 	{
 		int draw;// index in draws
 		GLint frontFirst, frontEnd;
 		GLint sidesFirst, backFirst, backEnd;
 		float centre[ 3 ];
+		float low[ 2 ], high[ 2 ];
 	};
 
 	void UpdatePlacement( bool reload );
