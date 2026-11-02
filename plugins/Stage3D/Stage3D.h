@@ -45,6 +45,7 @@ private:
 	unsigned int modeIndex       = 0;
 	unsigned int thresholdIndex  = 0;
 	unsigned int colorIndex      = 0;
+	unsigned int materialIndex   = 0;// Base Color (4), Emissive, Emissive Color (4), Bounce, Spread
 	unsigned int editScreenIndex = 0;
 	unsigned int firstPlacement  = 0;// X, Y, Z, Rot X, Rot Y, Rot Z, Size
 	unsigned int placementsIndex = 0;
@@ -59,6 +60,8 @@ private:
 	ffglex::FFGLShader screenShader;
 	ffglex::FFGLFBO scene;// with a depth buffer, which the host's target lacks; copied to it
 	std::vector< ScreenDraw > draws;
+	ffglex::FFGLShader spillShader;
+	ffglex::FFGLFBO spill;// a mipmapped copy of the layer: its glow, blurred, lights the slices
 	GLuint vao     = 0;
 	GLuint vbo     = 0;
 	int sliceCount = 0;

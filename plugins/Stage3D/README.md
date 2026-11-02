@@ -24,6 +24,12 @@ Comme [SliceChase](../SliceChase/README.md), l'effet lit le preset Advanced Outp
 | Color | Couleur | | blanc | *Color* et *Chase* : couleur des slices |
 | Backdrop | Range | 0 – 1 | 0.2 | Opacité du fond gris de chaque écran ; 0 le masque |
 | Extrude | Range | 0 – 1 | 0 | Épaisseur des slices, en hauteurs d'écran. La face avant reste sur le plan de l'écran et le volume part vers l'arrière ; le fond gris passe derrière. Les côtés et le dos sont ombrés |
+| **Material** | | | | |
+| Base Color | Couleur | | gris foncé | *Texture* : matière des slices (faces avant, côtés et dos), éclairée par l'éclairage de base, la lumière ponctuelle et la lueur des autres slices. Son alpha est l'opacité de la matière ; à 0, seule la lueur du layer reste, sur fond transparent |
+| Emissive | Range | 0 – 2 | 1 | *Texture* : intensité de la lueur du layer, ajoutée par-dessus la matière sans être éclairée. Les parties transparentes ou sombres du layer brillent peu. Au-delà de 1, la texture est surexposée |
+| Emissive Color | Couleur | | blanc | *Texture* : teinte de la lueur, et de la lumière qu'elle projette. Son alpha l'atténue comme Emissive |
+| Bounce | Range | 0 – 10 | 2 | *Texture* : force de la lumière que la lueur projette sur la matière autour d'elle (faces avant voisines, côtés extrudés). 0 la coupe (et son coût) |
+| Spread | Range | 0 – 0.5 | 0.05 | *Texture* : distance jusqu'où la lueur éclaire, en hauteurs du layer |
 | **Light** | | | | |
 | X, Y, Z | Range | -2 – 2 | 0, 0.5, 1 | Position de la lumière ponctuelle dans la scène (repère de la scène, pas affecté par Total) |
 | Intensity | Range | 0 – 5 | 0 | Puissance de la lumière, ajoutée à l'éclairage de base ; elle diminue avec le carré de la distance. 0 l'éteint |
@@ -46,7 +52,7 @@ Comme [SliceChase](../SliceChase/README.md), l'effet lit le preset Advanced Outp
 
 ### Modes
 
-- **Texture** : chaque slice montre la partie du layer couverte par son Input Map, comme sur la sortie réelle.
+- **Texture** : chaque slice montre la partie du layer couverte par son Input Map, comme sur la sortie réelle. Le layer y est émissif : il brille par-dessus la matière des slices (Base Color), et sa lueur déborde sur ce qui l'entoure : chaque face est éclairée par le layer flouté (rayon Spread) autour de l'endroit où elle le lit. Les faces avant proches d'une zone lumineuse s'éclairent en dégradé, et les côtés extrudés prennent la lumière là où elle atteint le contour de la slice. Le débordement suit la disposition du layer, pas les distances de la scène, et ne projette pas d'ombre. Pour un rendu « matière sombre éclairée par la texture », décocher Global Illumination et prendre une Base Color claire : seule la lueur l'éclaire.
 - **Color** : chaque slice est remplie d'une couleur unie.
 - **Chase** : le layer sert de mask et les slices, toutes visibles, sont remplies de la couleur. Comme dans SliceChase, chaque slice a un niveau de 0 à 1 : il monte vers 1 en Smooth secondes quand la luminance moyenne du mask sur sa surface dépasse le seuil, et redescend aussi en Smooth secondes sinon. Ce niveau fait passer la slice de son transform d'origine à sa cible (Move, Rotate et Scale combinés) : à 0.5, elle est à mi-chemin. Les mouvements se font dans les axes de l'écran, autour du centre de chaque slice, et suivent l'écran s'il est déplacé ou tourné.
 

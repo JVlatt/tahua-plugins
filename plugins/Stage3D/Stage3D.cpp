@@ -53,6 +53,7 @@ uniform vec3 move;
 uniform vec3 turn;
 uniform float scale;
 out vec2 uv;
+out vec2 spillUV;// in the spill texture, which has no padding
 out vec3 viewPosition;
 flat out int vSlice;
 flat out int vSide;
@@ -80,7 +81,8 @@ void main()
 	gl_Position  = mvp * vec4( position, 1.0 );
 	viewPosition = ( modelView * vec4( position, 1.0 ) ).xyz;
 	uv           = inputPosition * maxUV;
-	vSlice       = int( slice );
+	spillUV      = inputPosition;
+	vSlice      = int( slice );
 	vSide        = int( side );
 }
 )";
@@ -88,16 +90,26 @@ void main()
 // Textures are premultiplied, and so is what is drawn: blended with ONE, ONE_MINUS_SRC_ALPHA.
 // Sides and back faces are lit by a light at the camera, so the volume reads; front faces keep
 // their colours untouched.
+// In Texture mode, the slices are made of the base colour, lit, and the layer glows on top of
+// it. The glow spills onto what is around it: every face is lit by the layer blurred around
+// where the face takes it from, so the sides of a slice light up where the glow reaches its
+// outline. The spill follows the layer, not the distances in the scene, and casts no shadows.
 const char screenFragmentShader[] = R"(
 #version 410 core
 uniform sampler2D inputTexture;
+uniform sampler2D spill;// the layer, mipmapped
 uniform int mode;
 uniform vec4 color;
 uniform float backdrop;
 uniform vec3 lightPosition;// in view space
 uniform float lightIntensity;
 uniform int globalIllumination;
+uniform vec4 baseColor;
+uniform vec3 emissive;// the layer's glow, per channel
+uniform float bounce;// 0 when the glow lights nothing
+uniform float spread;// blur radius, in layer heights
 in vec2 uv;
+in vec2 spillUV;
 in vec3 viewPosition;
 flat in int vSlice;
 flat in int vSide;
@@ -112,10 +124,6 @@ void main()
 		fragColor = vec4( vec3( 0.25 ), 1.0 ) * backdrop;
 		return;
 	}
-	// Texture mode shows the layer; in Color and Chase modes (where the layer is the mask) the
-	// slices are filled with the colour.
-	vec4 surface = mode == 0 ? texture( inputTexture, uv ) : vec4( color.rgb, 1.0 ) * color.a;
-
 	// The face's normal, turned towards the camera: the side that is seen is the side lit.
 	vec3 normal = normalize( cross( dFdx( viewPosition ), dFdy( viewPosition ) ) );
 	if( dot( normal, viewPosition ) > 0.0 )
@@ -128,7 +136,58 @@ void main()
 	float lightDistance = length( toLight );
 	light += lightIntensity * max( dot( normal, toLight / lightDistance ), 0.0 ) / ( 1.0 + lightDistance * lightDistance );
 
-	fragColor = vec4( surface.rgb * light, surface.a );
+	// In Color and Chase modes (where the layer is the mask) the slices are filled with the colour.
+	if( mode != 0 )
+	{
+		vec4 surface = vec4( color.rgb, 1.0 ) * color.a;
+		fragColor    = vec4( surface.rgb * light, surface.a );
+		return;
+	}
+
+	// The spill: the centre and two rings of taps, read from the mip level whose texels are as
+	// far apart as the taps, so that the blur is smooth at any radius. The outer ring weighs
+	// less: the light fades away from the glow.
+	vec3 received = vec3( light );
+	if( bounce > 0.0 )
+	{
+		vec2 size   = vec2( textureSize( spill, 0 ) );
+		vec2 radius = vec2( spread * size.y / size.x, spread );
+		float lod   = log2( max( spread * size.y * 0.5, 1.0 ) );
+		vec3 sum    = textureLod( spill, spillUV, lod ).rgb;
+		for( int i = 0; i < 6; ++i )
+		{
+			float a  = float( i ) * 1.04719755;// 60 degrees
+			vec2 dir = vec2( cos( a ), sin( a ) );
+			sum += textureLod( spill, spillUV + 0.5 * radius * dir, lod ).rgb;
+			sum += 0.5 * textureLod( spill, spillUV + radius * vec2( cos( a + 0.5236 ), sin( a + 0.5236 ) ), lod + 1.0 ).rgb;
+		}
+		received += bounce * emissive * sum / 10.0;
+	}
+	vec4 layer = texture( inputTexture, uv );
+	fragColor  = vec4( baseColor.rgb * baseColor.a * received + layer.rgb * emissive, baseColor.a + layer.a * ( 1.0 - baseColor.a ) );
+}
+)";
+
+// Copies the layer into the spill target, texel for texel, before its mipmaps are made. Its
+// premultiplied colour: transparent or dark parts glow little.
+const char spillVertexShader[] = R"(
+#version 410 core
+layout( location = 0 ) in vec4 vPosition;
+
+void main()
+{
+	gl_Position = vPosition;
+}
+)";
+
+const char spillFragmentShader[] = R"(
+#version 410 core
+uniform sampler2D inputTexture;
+out vec4 fragColor;
+
+void main()
+{
+	fragColor = texelFetch( inputTexture, ivec2( gl_FragCoord.xy ), 0 );
 }
 )";
 
@@ -328,6 +387,23 @@ Stage3D::Stage3D()
 	AddParam( ParamRange::Create( "Backdrop", 0.2f, { 0.0f, 1.0f } ) );
 	AddParam( ParamRange::Create( "Extrude", 0.0f, { 0.0f, 1.0f } ) );// slice thickness, in screen heights
 
+	// Texture mode: the slices are made of the base colour, lit, and the layer glows on top of
+	// it (Emissive, tinted by its colour), spilling onto what is around it (Bounce, Spread). Base Color's
+	// alpha is the opacity of the slices; it starts dark grey, so that the glow shows.
+	materialIndex = (unsigned int)params.size();
+	AddParam( Param::Create( "BaseColor", FF_TYPE_HUE, 0.0f ) );
+	AddParam( Param::Create( "BaseColor_saturation", FF_TYPE_SATURATION, 0.0f ) );
+	AddParam( Param::Create( "BaseColor_brightness", FF_TYPE_BRIGHTNESS, 0.25f ) );
+	AddParam( Param::Create( "BaseColor_alpha", FF_TYPE_ALPHA, 1.0f ) );
+	SetParamDisplayName( materialIndex, "Base Color", false );
+	AddParam( ParamRange::Create( "Emissive", 1.0f, { 0.0f, 2.0f } ) );
+	AddHueColorParam( "EmissiveColor" );
+	SetParamDisplayName( materialIndex + 5, "Emissive Color", false );
+	AddParam( ParamRange::Create( "Bounce", 2.0f, { 0.0f, 10.0f } ) );
+	AddParam( ParamRange::Create( "Spread", 0.05f, { 0.0f, 0.5f } ) );// how far the glow spills, in layer heights
+	for( unsigned int i = materialIndex; i < params.size(); ++i )
+		SetParamGroup( i, "Material" );
+
 	// A point light in the scene, added to the base shading; off at intensity 0.
 	unsigned int firstLight = (unsigned int)params.size();
 	AddParam( ParamRange::Create( "LightX", 0.0f, { -2.0f, 2.0f } ) );
@@ -404,6 +480,8 @@ FFResult Stage3D::Init()
 	if( !levels.Init() )
 		return FF_FAIL;
 	if( !screenShader.Compile( screenVertexShader, screenFragmentShader ) )
+		return FF_FAIL;
+	if( !spillShader.Compile( spillVertexShader, spillFragmentShader ) )
 		return FF_FAIL;
 	return FF_SUCCESS;
 }
@@ -483,6 +561,8 @@ void Stage3D::UpdateModeVisibility()
 		SetParamVisibility( i, mode == MODE_CHASE, true );
 	for( unsigned int i = colorIndex; i < colorIndex + 4; ++i )
 		SetParamVisibility( i, mode != MODE_TEXTURE, true );
+	for( unsigned int i = materialIndex; i < materialIndex + 11; ++i )
+		SetParamVisibility( i, mode == MODE_TEXTURE, true );
 }
 
 Stage3D::Placement Stage3D::PlacementOf( int screen ) const
@@ -580,14 +660,46 @@ FFResult Stage3D::Render( ProcessOpenGLStruct* inputTextures )
 	}
 	std::sort( order.begin(), order.end(), [ & ]( size_t a, size_t b ) { return depth[ a ] < depth[ b ]; } );
 
-	float hue = GetParam( "Color" )->GetValue();
-	float rgb[ 3 ];
-	HSVtoRGB( hue == 1.0f ? 0.0f : hue,
-	          GetParam( "Color_saturation" )->GetValue(),
-	          GetParam( "Color_brightness" )->GetValue(),
-	          rgb[ 0 ], rgb[ 1 ], rgb[ 2 ] );
+	auto hueColor = [ this ]( const std::string& name, float rgb[ 3 ] ) {
+		float hue = GetParam( name )->GetValue();
+		HSVtoRGB( hue == 1.0f ? 0.0f : hue,
+		          GetParam( name + "_saturation" )->GetValue(),
+		          GetParam( name + "_brightness" )->GetValue(),
+		          rgb[ 0 ], rgb[ 1 ], rgb[ 2 ] );
+	};
+	float rgb[ 3 ], base[ 3 ], emission[ 3 ];
+	hueColor( "Color", rgb );
+	hueColor( "BaseColor", base );
+	hueColor( "EmissiveColor", emission );
 	FFGLTexCoords maxCoords = GetMaxGLTexCoords( input );
 	float extrude           = GetParam( "Extrude" )->GetValue();
+
+	// Texture mode: the layer copied without its padding, and mipmapped, for its glow to spill.
+	float bounce = GetParam( "Bounce" )->GetValue();
+	bool spilled = mode == MODE_TEXTURE && bounce > 0.0f;
+	if( spilled )
+	{
+		if( spill.GetWidth() != input.Width || spill.GetHeight() != input.Height )
+		{
+			spill.Release();
+			if( !spill.Initialise( input.Width, input.Height ) )
+				return FF_FAIL;
+			Scoped2DTextureBinding textureBinding( spill.GetTextureInfo().Handle );
+			glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR );
+			glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE );
+			glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE );
+		}
+		{
+			ScopedFBOBinding spillBinding( spill.GetGLID(), ScopedFBOBinding::RB_REVERT );
+			glViewport( 0, 0, input.Width, input.Height );
+			ScopedShaderBinding spillShaderBinding( spillShader.GetGLID() );
+			Scoped2DTextureBinding inputBinding( input.Handle );
+			spillShader.Set( "inputTexture", 0 );
+			quad.Draw();
+		}
+		Scoped2DTextureBinding textureBinding( spill.GetTextureInfo().Handle );
+		glGenerateMipmap( GL_TEXTURE_2D );
+	}
 
 	{
 		ScopedFBOBinding fboBinding( scene.GetGLID(), ScopedFBOBinding::RB_REVERT );
@@ -599,14 +711,16 @@ FFResult Stage3D::Render( ProcessOpenGLStruct* inputTextures )
 
 		ScopedShaderBinding shaderBinding( screenShader.GetGLID() );
 		// Bound by hand: ScopedSamplerActivation returns to unit 0, not to the previous unit.
-		const GLuint textures[] = { input.Handle, mode == MODE_CHASE && sliceCount > 0 ? levels.Texture() : 0 };
-		for( GLuint unit = 0; unit < 2; ++unit )
+		const GLuint textures[] = { input.Handle, mode == MODE_CHASE && sliceCount > 0 ? levels.Texture() : 0,
+			                        spilled ? spill.GetTextureInfo().Handle : 0 };
+		for( GLuint unit = 0; unit < 3; ++unit )
 		{
 			glActiveTexture( GL_TEXTURE0 + unit );
 			glBindTexture( GL_TEXTURE_2D, textures[ unit ] );
 		}
 		screenShader.Set( "inputTexture", 0 );
 		screenShader.Set( "levels", 1 );
+		screenShader.Set( "spill", 2 );
 		screenShader.Set( "mode", mode );
 		screenShader.Set( "color", rgb[ 0 ], rgb[ 1 ], rgb[ 2 ], GetParam( "Color_alpha" )->GetValue() );
 		screenShader.Set( "backdrop", GetParam( "Backdrop" )->GetValue() );
@@ -614,6 +728,12 @@ FFResult Stage3D::Render( ProcessOpenGLStruct* inputTextures )
 		screenShader.Set( "lightPosition", light.x, light.y, light.z );
 		screenShader.Set( "lightIntensity", GetParam( "LightIntensity" )->GetValue() );
 		screenShader.Set( "globalIllumination", GetParam( "GlobalIllumination" )->GetValue() > 0.5f ? 1 : 0 );
+		// Emissive Color's alpha scales the glow, like Emissive.
+		float emissive = GetParam( "Emissive" )->GetValue() * GetParam( "EmissiveColor_alpha" )->GetValue();
+		screenShader.Set( "baseColor", base[ 0 ], base[ 1 ], base[ 2 ], GetParam( "BaseColor_alpha" )->GetValue() );
+		screenShader.Set( "emissive", emission[ 0 ] * emissive, emission[ 1 ] * emissive, emission[ 2 ] * emissive );
+		screenShader.Set( "bounce", spilled ? bounce : 0.0f );
+		screenShader.Set( "spread", GetParam( "Spread" )->GetValue() );
 		screenShader.Set( "extrude", extrude );
 		screenShader.Set( "maxUV", maxCoords.s, maxCoords.t );
 		screenShader.Set( "move", GetParam( "MoveX" )->GetValue(), GetParam( "MoveY" )->GetValue(), GetParam( "MoveZ" )->GetValue() );
@@ -642,7 +762,7 @@ FFResult Stage3D::Render( ProcessOpenGLStruct* inputTextures )
 		}
 		glDepthMask( GL_TRUE );
 
-		for( GLuint unit = 2; unit-- > 0; )
+		for( GLuint unit = 3; unit-- > 0; )
 		{
 			glActiveTexture( GL_TEXTURE0 + unit );
 			glBindTexture( GL_TEXTURE_2D, 0 );
@@ -668,6 +788,8 @@ void Stage3D::Clean()
 	scene.Release();
 	levels.FreeGLResources();
 	screenShader.FreeGLResources();
+	spill.Release();
+	spillShader.FreeGLResources();
 }
 
 namespace
