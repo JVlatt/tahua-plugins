@@ -7,6 +7,7 @@ Plugins [FFGL](https://github.com/resolume/ffgl) (effets, sources, mixers) pour 
 | [Tahua Tint](plugins/Tint/README.md) | Effet | `TE01` | Rotation de teinte, saturation, inversion |
 | [Tahua SliceChase](plugins/SliceChase/README.md) | Effet | `TE02` | Allume les slices de l'Advanced Output là où la source du layer est lumineuse |
 | [Tahua Stage3D](plugins/Stage3D/README.md) | Effet | `TE03` | Vue 3D en perspective des écrans de l'Advanced Output, texturés par le layer |
+| [Tahua Waves](plugins/Waves/README.md) | Source | `TS01` | Masques de vagues animés : anneaux, contours de bruit, pulses calés sur le beat |
 
 ## Structure
 
