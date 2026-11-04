@@ -7,6 +7,7 @@ Plugins [FFGL](https://github.com/resolume/ffgl) (effets, sources, mixers) pour 
 | [Tahua Tint](plugins/Tint/README.md) | Effet | `TE01` | Rotation de teinte, saturation, inversion |
 | [Tahua SliceChase](plugins/SliceChase/README.md) | Effet | `TE02` | Allume les slices de l'Advanced Output là où la source du layer est lumineuse |
 | [Tahua Stage3D](plugins/Stage3D/README.md) | Effet | `TE03` | Vue 3D en perspective des écrans de l'Advanced Output, texturés par le layer |
+| [Tahua SliceEdges](plugins/SliceEdges/README.md) | Effet | `TE04` | Contours des slices de l'Advanced Output, avec pulse sur le beat |
 | [Tahua Waves](plugins/Waves/README.md) | Source | `TS01` | Masques de vagues animés : anneaux, contours de bruit, pulses calés sur le beat |
 
 ## Structure
@@ -17,7 +18,7 @@ templates/             gabarits effect / source / mixer + README de plugin
 scripts/new_plugin.cmake   crée un plugin depuis un gabarit
 cmake/                 build du SDK FFGL et fonction tahua_add_plugin()
 common/include/        en-tête partagé par les plugins
-common/slices/         lecture des presets Advanced Output, cases écrans / familles, chase (SliceChase, Stage3D)
+common/slices/         lecture des presets Advanced Output, cases écrans / familles, chase (SliceChase, SliceEdges, Stage3D)
 external/ffgl/         SDK FFGL officiel (submodule)
 external/pugixml/      lecteur XML (submodule, utilisé par common/slices)
 external/earcut/       triangulation de polygones (submodule, utilisé par common/slices)

@@ -86,6 +86,21 @@ void Triangulate( const Clipper2Lib::PolyPathD& outer, double width, double heig
 			Triangulate( *island, width, height, triangles );
 }
 
+// Every ring of the tree (outers, holes, islands in holes...), normalised like Triangulate's.
+void AppendContours( const Clipper2Lib::PolyPathD& node, double width, double height, PresetSlice& slice )
+{
+	std::vector< float > ring;
+	for( const Clipper2Lib::PointD& p : node.Polygon() )
+	{
+		ring.push_back( (float)( p.x / width ) );
+		ring.push_back( (float)( 1.0 - p.y / height ) );
+	}
+	if( ring.size() >= 6 )
+		slice.contours.push_back( std::move( ring ) );
+	for( const auto& child : node )
+		AppendContours( *child, width, height, slice );
+}
+
 // Stores the triangles and spreads the samples over them. Returns false for a shape without area.
 bool BuildSlice( const std::vector< Triangle >& triangles, unsigned int seed, PresetSlice& slice )
 {
@@ -332,6 +347,8 @@ bool LoadPreset( const std::string& utf8Path, Preset& preset, std::string& error
 			if( BuildSlice( triangles, seed++, slice ) )
 			{
 				BuildMesh( layer, area, triangles, sizes, slice );
+				for( const auto& outer : tree )
+					AppendContours( *outer, width, height, slice );
 				screen.slices.push_back( std::move( slice ) );
 			}
 		}

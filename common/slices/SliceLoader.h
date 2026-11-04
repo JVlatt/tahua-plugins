@@ -13,6 +13,8 @@ struct PresetSlice
 	// The same shape placed on its screen: output x, y (normalised to the screen's output size,
 	// (0,0) bottom-left) then input x, y per vertex, 3 vertices per triangle.
 	std::vector< float > mesh;
+	// Outline of the shape: its outer rings and those of its holes, x, y per point.
+	std::vector< std::vector< float > > contours;
 };
 
 struct PresetScreen
