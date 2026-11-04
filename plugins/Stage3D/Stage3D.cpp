@@ -104,6 +104,8 @@ uniform vec4 color;
 uniform float backdrop;
 uniform vec3 lightPosition;// in view space
 uniform float lightIntensity;
+uniform vec3 lightColor;
+uniform vec3 globalColor;
 uniform int globalIllumination;
 uniform vec4 baseColor;
 uniform vec3 emissive;// the layer's glow, per channel
@@ -133,12 +135,12 @@ void main()
 	if( dot( normal, viewPosition ) > 0.0 )
 		normal = -normal;
 	// Base shading, unless turned off so that only the point light shows the slices.
-	float light = globalIllumination == 0 ? 0.0 : vSide != 0 ? 0.3 + 0.5 * abs( dot( normal, normalize( viewPosition ) ) ) : 1.0;
+	vec3 light = globalColor * ( globalIllumination == 0 ? 0.0 : vSide != 0 ? 0.3 + 0.5 * abs( dot( normal, normalize( viewPosition ) ) ) : 1.0 );
 
-	// Point light, added on top: diffuse, fading with the square of the distance.
+	// Point light, added on top in its colour: diffuse, fading with the square of the distance.
 	vec3 toLight = lightPosition - viewPosition;
 	float lightDistance = length( toLight );
-	light += lightIntensity * max( dot( normal, toLight / lightDistance ), 0.0 ) / ( 1.0 + lightDistance * lightDistance );
+	light += lightColor * lightIntensity * max( dot( normal, toLight / lightDistance ), 0.0 ) / ( 1.0 + lightDistance * lightDistance );
 
 	// In Color and Chase modes (where the layer is the mask) the slices are filled with the colour.
 	if( mode != 0 )
@@ -151,7 +153,7 @@ void main()
 	// The spill: the centre and two rings of taps, read from the mip level whose texels are as
 	// far apart as the taps, so that the blur is smooth at any radius. The outer ring weighs
 	// less: the light fades away from the glow.
-	vec3 received = vec3( light );
+	vec3 received = light;
 	if( bounce > 0.0 )
 	{
 		vec2 size   = vec2( textureSize( spill, 0 ) );
@@ -175,8 +177,8 @@ void main()
 	surface    = mix( surface, vec4( received, 1.0 ), fresnel * pow( 1.0 - max( dot( normal, toEye ), 0.0 ), 3.0 ) );
 	// The point light's highlight, as opaque as it is bright.
 	vec3 halfway    = normalize( toLight / lightDistance + toEye );
-	float highlight = specular * lightIntensity * pow( max( dot( normal, halfway ), 0.0 ), exp2( 1.0 + 10.0 * glossiness ) ) / ( 1.0 + lightDistance * lightDistance );
-	fragColor       = vec4( surface.rgb + highlight, min( surface.a + highlight, 1.0 ) );
+	vec3 highlight = lightColor * specular * lightIntensity * pow( max( dot( normal, halfway ), 0.0 ), exp2( 1.0 + 10.0 * glossiness ) ) / ( 1.0 + lightDistance * lightDistance );
+	fragColor      = vec4( surface.rgb + highlight, min( surface.a + max( highlight.r, max( highlight.g, highlight.b ) ), 1.0 ) );
 }
 )";
 
@@ -428,12 +430,14 @@ Stage3D::Stage3D()
 	AddParam( ParamRange::Create( "LightZ", 1.0f, { -2.0f, 2.0f } ) );
 	AddParam( ParamRange::Create( "LightIntensity", 0.0f, { 0.0f, 5.0f } ) );
 	AddParam( ParamBool::Create( "GlobalIllumination", true ) );
-	const char* lightNames[] = { "X", "Y", "Z", "Intensity", "Global Illumination" };
-	for( unsigned int i = 0; i < 5; ++i )
-	{
+	AddHueColorParam( "LightColor" );// its alpha dims the light, like Intensity
+	AddHueColorParam( "GlobalColor" );// the base shading's; its alpha dims it
+	const char* lightNames[] = { "X", "Y", "Z", "Intensity", "Global Illumination", "Point Color" };
+	for( unsigned int i = 0; i < 6; ++i )
 		SetParamDisplayName( firstLight + i, lightNames[ i ], false );
-		SetParamGroup( firstLight + i, "Light" );
-	}
+	SetParamDisplayName( firstLight + 9, "Global Color", false );
+	for( unsigned int i = firstLight; i < params.size(); ++i )
+		SetParamGroup( i, "Light" );
 
 	// Orbit around the scene's origin, in scene units: the view does not follow the screens.
 	unsigned int firstCamera = (unsigned int)params.size();
@@ -685,6 +689,9 @@ FFResult Stage3D::Render( ProcessOpenGLStruct* inputTextures )
 	hueColor( "Color", rgb );
 	hueColor( "BaseColor", base );
 	hueColor( "EmissiveColor", emission );
+	float lightColor[ 3 ], globalColor[ 3 ];
+	hueColor( "LightColor", lightColor );
+	hueColor( "GlobalColor", globalColor );
 	FFGLTexCoords maxCoords = GetMaxGLTexCoords( input );
 
 	// Texture mode: the layer copied without its padding, and mipmapped, for its glow to spill.
@@ -739,7 +746,10 @@ FFResult Stage3D::Render( ProcessOpenGLStruct* inputTextures )
 		screenShader.Set( "backdrop", GetParam( "Backdrop" )->GetValue() );
 		Vec3 light = view.Transform( { GetParam( "LightX" )->GetValue(), GetParam( "LightY" )->GetValue(), GetParam( "LightZ" )->GetValue() } );
 		screenShader.Set( "lightPosition", light.x, light.y, light.z );
-		screenShader.Set( "lightIntensity", GetParam( "LightIntensity" )->GetValue() );
+		screenShader.Set( "lightIntensity", GetParam( "LightIntensity" )->GetValue() * GetParam( "LightColor_alpha" )->GetValue() );
+		screenShader.Set( "lightColor", lightColor[ 0 ], lightColor[ 1 ], lightColor[ 2 ] );
+		float global = GetParam( "GlobalColor_alpha" )->GetValue();
+		screenShader.Set( "globalColor", globalColor[ 0 ] * global, globalColor[ 1 ] * global, globalColor[ 2 ] * global );
 		screenShader.Set( "globalIllumination", GetParam( "GlobalIllumination" )->GetValue() > 0.5f ? 1 : 0 );
 		// Emissive Color's alpha scales the glow, like Emissive.
 		float emissive = GetParam( "Emissive" )->GetValue() * GetParam( "EmissiveColor_alpha" )->GetValue();

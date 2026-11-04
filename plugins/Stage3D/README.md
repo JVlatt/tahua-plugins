@@ -37,6 +37,8 @@ Comme [SliceChase](../SliceChase/README.md), l'effet lit le preset Advanced Outp
 | X, Y, Z | Range | -2 – 2 | 0, 0.5, 1 | Position de la lumière ponctuelle dans la scène (repère de la scène, pas affecté par Total) |
 | Intensity | Range | 0 – 5 | 0 | Puissance de la lumière, ajoutée à l'éclairage de base ; elle diminue avec le carré de la distance. 0 l'éteint |
 | Global Illumination | Case à cocher | | cochée | Éclairage de base (faces avant à pleine couleur, côtés ombrés). Décochée, seule la lumière ponctuelle éclaire les slices : ce qu'elle n'atteint pas est noir |
+| Point Color | Couleur | | blanc | Teinte de la lumière ponctuelle, et de son reflet (Specular). Son alpha l'atténue comme Intensity |
+| Global Color | Couleur | | blanc | Teinte de l'éclairage de base (Global Illumination). Son alpha l'atténue |
 | **Camera** | | | | |
 | Yaw | Range | -180 – 180° | 0 | Rotation de la caméra autour de l'axe vertical passant par l'origine |
 | Pitch | Range | -89 – 89° | 0 | Hauteur de la caméra |
@@ -83,6 +85,9 @@ Les réglages de placement par écran ne sont pas animables : ils éditent l'éc
 - macOS 10.15 ou plus récent, Intel et Apple Silicon (binaire universel)
 
 ## Notes de version
+
+### 1.4 — 2026-11-04
+- Lumière : couleur de la lumière ponctuelle et de son reflet (Point Color), et couleur de l'éclairage de base (Global Color).
 
 ### 1.3 — 2026-11-02
 - Total Rot et Total Size tournent et agrandissent l'ensemble autour de son centre (slices avec leur décalage Z et leur extrusion, backdrops visibles), et non plus autour de l'origine de la scène.
