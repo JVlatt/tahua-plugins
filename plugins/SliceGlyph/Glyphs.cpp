@@ -1,6 +1,8 @@
 #include "Glyphs.h"
 #include <algorithm>
 #include <cmath>
+#include <deque>
+#include <unordered_map>
 
 namespace glyphs
 {
@@ -50,7 +52,8 @@ struct Vec
 	float x, y;
 };
 
-// Collects strokes through a placement: mirror, scale, rotation, then offset.
+// Collects strokes through a placement: mirror, scale, rotation, then offset; then the base
+// placement, which puts a whole symbol somewhere: scale, then offset.
 class Builder
 {
 public:
@@ -62,6 +65,16 @@ public:
 		angle  = angle_;
 		offset = { x, y };
 		mirror = mirror_;
+	}
+	void SetBase( float x = 0.0f, float y = 0.0f, float scale_ = 1.0f )
+	{
+		baseOffset = { x, y };
+		baseScale  = scale_;
+	}
+	void Path( const std::vector< Vec >& points )
+	{
+		for( size_t i = 0; i + 1 < points.size(); ++i )
+			Line( points[ i ].x, points[ i ].y, points[ i + 1 ].x, points[ i + 1 ].y );
 	}
 	void Line( float x0, float y0, float x1, float y1 )
 	{
@@ -80,7 +93,7 @@ public:
 	void Arc( float x, float y, float r, float from, float to )
 	{
 		Vec c = Map( x, y );
-		prims.push_back( { c.x, c.y, MapAngle( from ), MapAngle( to ), r * scale, ARC } );
+		prims.push_back( { c.x, c.y, MapAngle( from ), MapAngle( to ), r * scale * baseScale, ARC } );
 	}
 	void Ring( float x, float y, float r )
 	{
@@ -89,7 +102,7 @@ public:
 	void Dot( float x, float y, float r )
 	{
 		Vec c = Map( x, y );
-		prims.push_back( { c.x, c.y, 0.0f, 0.0f, r * scale, DOT } );
+		prims.push_back( { c.x, c.y, 0.0f, 0.0f, r * scale * baseScale, DOT } );
 	}
 
 private:
@@ -100,7 +113,7 @@ private:
 		x *= scale;
 		y *= scale;
 		float c = std::cos( angle ), s = std::sin( angle );
-		return { c * x - s * y + offset.x, s * x + c * y + offset.y };
+		return { ( c * x - s * y + offset.x ) * baseScale + baseOffset.x, ( s * x + c * y + offset.y ) * baseScale + baseOffset.y };
 	}
 	float MapAngle( float a ) const
 	{
@@ -111,7 +124,242 @@ private:
 	float angle  = 0.0f;
 	Vec offset   = { 0.0f, 0.0f };
 	bool mirror  = false;
+	float baseScale = 1.0f;
+	Vec baseOffset  = { 0.0f, 0.0f };
 };
+
+// ---- Shape tools ----
+
+struct Circle
+{
+	Vec centre;
+	float radius;
+};
+
+Vec FieldPoint( const Field& f, int i, int j )
+{
+	return { f.x0 + (float)i * f.step, f.y0 + (float)j * f.step };
+}
+
+// Largest circle inside the shape that keeps clear of the taken ones; radius 0 if none.
+Circle Largest( const Field& f, const std::vector< Circle >& taken )
+{
+	Circle best = { { 0.0f, 0.0f }, 0.0f };
+	for( int j = 0; j < f.rows; ++j )
+		for( int i = 0; i < f.cols; ++i )
+		{
+			float r = f.values[ (size_t)j * f.cols + i ];
+			if( r <= best.radius )
+				continue;
+			Vec p = FieldPoint( f, i, j );
+			for( const Circle& c : taken )
+				r = std::min( r, std::hypot( p.x - c.centre.x, p.y - c.centre.y ) - c.radius );
+			if( r > best.radius )
+				best = { p, r };
+		}
+	return best;
+}
+
+// Typical half thickness of the shape: three times its mean depth (a disc's radius), at most its deepest point.
+float Thickness( const Field& f )
+{
+	double sum = 0.0;
+	int inside = 0;
+	float deepest = 0.0f;
+	for( float v : f.values )
+		if( v > 0.0f )
+		{
+			sum += v;
+			++inside;
+			deepest = std::max( deepest, v );
+		}
+	return inside == 0 ? 0.0f : std::min( deepest, 3.0f * (float)( sum / inside ) );
+}
+
+float Area( const Field& f )
+{
+	int inside = 0;
+	for( float v : f.values )
+		inside += v > 0.0f;
+	return (float)inside * f.step * f.step;
+}
+
+// Unit vector pointing out of the shape at p.
+Vec Outward( const Field& f, Vec p )
+{
+	float e  = f.step * 0.5f;
+	float gx = f.At( p.x + e, p.y ) - f.At( p.x - e, p.y );
+	float gy = f.At( p.x, p.y + e ) - f.At( p.x, p.y - e );
+	float n  = std::max( std::hypot( gx, gy ), 1e-9f );
+	return { -gx / n, -gy / n };
+}
+
+// Drops the points within epsilon of the line through their neighbours (Ramer-Douglas-Peucker).
+void Simplify( const std::vector< Vec >& points, size_t first, size_t last, float epsilon, std::vector< Vec >& out )
+{
+	float worst = 0.0f;
+	size_t index = first;
+	Vec a = points[ first ], b = points[ last ];
+	float abx = b.x - a.x, aby = b.y - a.y;
+	float ab2 = std::max( abx * abx + aby * aby, 1e-12f );
+	for( size_t i = first + 1; i < last; ++i )
+	{
+		float t = std::min( std::max( ( ( points[ i ].x - a.x ) * abx + ( points[ i ].y - a.y ) * aby ) / ab2, 0.0f ), 1.0f );
+		float d = std::hypot( points[ i ].x - a.x - abx * t, points[ i ].y - a.y - aby * t );
+		if( d > worst )
+		{
+			worst = d;
+			index = i;
+		}
+	}
+	if( worst > epsilon )
+	{
+		Simplify( points, first, index, epsilon, out );
+		Simplify( points, index, last, epsilon, out );
+	}
+	else
+		out.push_back( b );
+}
+
+// Lines where the distance to the outline is level, as polylines (a closed one ends on its start).
+std::vector< std::vector< Vec > > Contours( const Field& f, float level )
+{
+	auto V = [ & ]( int i, int j ) { return f.values[ (size_t)j * f.cols + i ] - level; };
+	// Edge ids: 2 per grid point, its edge to the right then its edge upwards.
+	auto Crossing = [ & ]( int id ) -> Vec {
+		int cell = id / 2, i = cell % f.cols, j = cell / f.cols;
+		bool up  = id % 2 == 1;
+		float a  = V( i, j ), b = up ? V( i, j + 1 ) : V( i + 1, j );
+		float t  = a / ( a - b );
+		return up ? Vec{ f.x0 + (float)i * f.step, f.y0 + ( (float)j + t ) * f.step } : Vec{ f.x0 + ( (float)i + t ) * f.step, f.y0 + (float)j * f.step };
+	};
+	std::vector< std::pair< int, int > > segments;
+	for( int j = 0; j + 1 < f.rows; ++j )
+		for( int i = 0; i + 1 < f.cols; ++i )
+		{
+			float v0 = V( i, j ), v1 = V( i + 1, j ), v2 = V( i + 1, j + 1 ), v3 = V( i, j + 1 );
+			int code = ( v0 > 0.0f ) | ( v1 > 0.0f ) << 1 | ( v2 > 0.0f ) << 2 | ( v3 > 0.0f ) << 3;
+			int e0 = ( j * f.cols + i ) * 2;           // bottom
+			int e1 = ( j * f.cols + i + 1 ) * 2 + 1;   // right
+			int e2 = ( ( j + 1 ) * f.cols + i ) * 2;   // top
+			int e3 = ( j * f.cols + i ) * 2 + 1;       // left
+			bool centre = v0 + v1 + v2 + v3 > 0.0f;
+			switch( code )
+			{
+			case 1: case 14: segments.push_back( { e3, e0 } ); break;
+			case 2: case 13: segments.push_back( { e0, e1 } ); break;
+			case 3: case 12: segments.push_back( { e3, e1 } ); break;
+			case 4: case 11: segments.push_back( { e1, e2 } ); break;
+			case 6: case 9: segments.push_back( { e0, e2 } ); break;
+			case 7: case 8: segments.push_back( { e2, e3 } ); break;
+			case 5:
+				if( centre )
+					segments.insert( segments.end(), { { e0, e1 }, { e2, e3 } } );
+				else
+					segments.insert( segments.end(), { { e3, e0 }, { e1, e2 } } );
+				break;
+			case 10:
+				if( centre )
+					segments.insert( segments.end(), { { e3, e0 }, { e1, e2 } } );
+				else
+					segments.insert( segments.end(), { { e0, e1 }, { e2, e3 } } );
+				break;
+			default: break;
+			}
+		}
+
+	// Chain the segments through their shared edges.
+	std::unordered_map< int, std::vector< int > > byEdge;
+	for( int s = 0; s < (int)segments.size(); ++s )
+	{
+		byEdge[ segments[ s ].first ].push_back( s );
+		byEdge[ segments[ s ].second ].push_back( s );
+	}
+	std::vector< char > used( segments.size(), 0 );
+	std::vector< std::vector< Vec > > lines;
+	for( size_t s0 = 0; s0 < segments.size(); ++s0 )
+	{
+		if( used[ s0 ] )
+			continue;
+		used[ s0 ] = 1;
+		std::deque< int > ids = { segments[ s0 ].first, segments[ s0 ].second };
+		for( int side = 0; side < 2; ++side )
+		{
+			bool front = side == 1;
+			while( true )
+			{
+				int end  = front ? ids.front() : ids.back();
+				int next = -1;
+				for( int s : byEdge[ end ] )
+					if( !used[ s ] )
+					{
+						next = s;
+						break;
+					}
+				if( next < 0 )
+					break;
+				used[ next ] = 1;
+				int other = segments[ next ].first == end ? segments[ next ].second : segments[ next ].first;
+				if( front )
+					ids.push_front( other );
+				else
+					ids.push_back( other );
+			}
+		}
+		std::vector< Vec > points;
+		for( int id : ids )
+			points.push_back( Crossing( id ) );
+		std::vector< Vec > line = { points.front() };
+		Simplify( points, 0, points.size() - 1, f.step * 0.25f, line );
+		if( line.size() >= 2 )
+			lines.push_back( std::move( line ) );
+	}
+	return lines;
+}
+
+float Length( const std::vector< Vec >& line )
+{
+	float length = 0.0f;
+	for( size_t i = 0; i + 1 < line.size(); ++i )
+		length += std::hypot( line[ i + 1 ].x - line[ i ].x, line[ i + 1 ].y - line[ i ].y );
+	return length;
+}
+
+// The point at distance s along the line, and its direction there.
+Vec PointAlong( const std::vector< Vec >& line, float s, Vec* direction = nullptr )
+{
+	for( size_t i = 0; i + 1 < line.size(); ++i )
+	{
+		float dx = line[ i + 1 ].x - line[ i ].x, dy = line[ i + 1 ].y - line[ i ].y;
+		float l  = std::hypot( dx, dy );
+		if( s <= l || i + 2 == line.size() )
+		{
+			float t = l > 0.0f ? std::min( s / l, 1.0f ) : 0.0f;
+			if( direction )
+				*direction = l > 0.0f ? Vec{ dx / l, dy / l } : Vec{ 1.0f, 0.0f };
+			return { line[ i ].x + dx * t, line[ i ].y + dy * t };
+		}
+		s -= l;
+	}
+	if( direction )
+		*direction = { 1.0f, 0.0f };
+	return line.front();
+}
+
+// The part of the line from s0 to s1 along it.
+std::vector< Vec > Piece( const std::vector< Vec >& line, float s0, float s1 )
+{
+	std::vector< Vec > piece = { PointAlong( line, s0 ) };
+	float along = 0.0f;
+	for( size_t i = 0; i + 1 < line.size(); ++i )
+	{
+		along += std::hypot( line[ i + 1 ].x - line[ i ].x, line[ i + 1 ].y - line[ i ].y );
+		if( along > s0 && along < s1 )
+			piece.push_back( line[ i + 1 ] );
+	}
+	piece.push_back( PointAlong( line, s1 ) );
+	return piece;
+}
 
 // The 24 runes of the Elder Futhark, as polylines in x -0.5 to 0.5, y -1 to 1.
 struct Rune
@@ -317,10 +565,14 @@ void Ogham( Builder& b, Rng& rng, float c )
 }
 
 // Printed circuit traces on a grid, with 45 degree bends, from a pad to a via.
-void Circuit( Builder& b, Rng& rng, float c, float bx, float by )
+// With a shape, only the cells well inside it are used, and the grid follows its thickness.
+void Circuit( Builder& b, Rng& rng, float c, float bx, float by, const Field* f )
 {
 	b.Place();
-	float cell = 2.0f / ( 5.0f + c * 7.0f );
+	float cell = 2.0f / ( 5.0f + c * 7.0f ) * ( f ? Thickness( *f ) : 1.0f );
+	if( cell <= 0.0f )
+		return;
+	cell       = std::max( cell, std::sqrt( 4.0f * bx * by / 6000.0f ) );
 	int cols   = std::max( 2, (int)( 2.0f * bx / cell ) );
 	int rows   = std::max( 2, (int)( 2.0f * by / cell ) );
 	float sx   = 2.0f * bx / (float)cols;
@@ -329,26 +581,33 @@ void Circuit( Builder& b, Rng& rng, float c, float bx, float by )
 	auto X     = [ & ]( int i ) { return -bx + ( (float)i + 0.5f ) * sx; };
 	auto Y     = [ & ]( int j ) { return -by + ( (float)j + 0.5f ) * sy; };
 	std::vector< char > used( (size_t)( cols * rows ), 0 );
+	int freeCells = cols * rows;
+	if( f )
+		for( int j = 0; j < rows; ++j )
+			for( int i = 0; i < cols; ++i )
+				if( f->At( X( i ), Y( j ) ) < 0.45f * std::min( sx, sy ) )
+				{
+					used[ j * cols + i ] = 1;
+					--freeCells;
+				}
 	const int DX[ 8 ] = { 1, 1, 0, -1, -1, -1, 0, 1 };
 	const int DY[ 8 ] = { 0, 1, 1, 1, 0, -1, -1, -1 };
 
-	int traces = 3 + (int)( c * 12.0f );
+	int traces = f ? std::max( 1, (int)( (float)freeCells * ( 0.06f + 0.12f * c ) ) ) : 3 + (int)( c * 12.0f );
 	for( int t = 0; t < traces; ++t )
 	{
-		int x = -1, y = -1;
-		for( int attempt = 0; attempt < 20; ++attempt )
-		{
-			int i = rng.Int( cols ), j = rng.Int( rows );
-			if( !used[ j * cols + i ] )
-			{
-				x = i;
-				y = j;
-				break;
-			}
-		}
-		if( x < 0 )
+		// The n-th free cell, n at random.
+		if( freeCells <= 0 )
 			break;
+		int n = rng.Int( freeCells ), x = -1, y = -1;
+		for( int k = 0; k < cols * rows && x < 0; ++k )
+			if( !used[ k ] && n-- == 0 )
+			{
+				x = k % cols;
+				y = k / cols;
+			}
 		used[ y * cols + x ] = 1;
+		--freeCells;
 		std::vector< int > corners = { x, y };
 		int dir  = rng.Int( 4 ) * 2;// starts straight
 		int legs = 1 + rng.Int( 3 );
@@ -364,6 +623,7 @@ void Circuit( Builder& b, Rng& rng, float c, float bx, float by )
 				x = nx;
 				y = ny;
 				used[ y * cols + x ] = 1;
+				--freeCells;
 				moved = true;
 			}
 			if( moved )
@@ -382,10 +642,15 @@ void Circuit( Builder& b, Rng& rng, float c, float bx, float by )
 	}
 }
 
-// An integrated circuit: its body, and traces fanning out from its pins.
-void Chip( Builder& b, Rng& rng, float c, float bx, float by )
+// An integrated circuit: its body, and traces fanning out from its pins. With a shape, the chip is
+// drawn at centre, scaled by size, and its traces stop where the shape ends.
+void Chip( Builder& b, Rng& rng, float c, float bx, float by, const Field* f = nullptr, Vec centre = { 0.0f, 0.0f }, float size = 1.0f )
 {
 	b.Place();
+	b.SetBase( centre.x, centre.y, size );
+	// Depth of a local point inside the shape, in local units.
+	auto Depth = [ & ]( float x, float y ) { return f ? f->At( centre.x + x * size, centre.y + y * size ) / size : 1.0f; };
+	float margin = f ? std::max( f->step * 0.5f / size, 0.04f ) : 0.0f;
 	float hw = 0.38f * bx, hh = 0.38f * by;
 	b.Polyline( { -hw, -hh, hw, -hh, hw, hh, -hw, hh }, 0.0f, true );
 	b.Arc( 0, hh, 0.07f, PI, TAU );
@@ -425,12 +690,28 @@ void Chip( Builder& b, Rng& rng, float c, float bx, float by )
 				dv = dv > 0.0f ? room : -room;
 			float u3   = u2 + std::abs( dv );
 			float uEnd = std::max( u3 + 0.05f, boxN * rng.Range( 0.75f, 0.95f ) );
+			auto Inside = [ & ]( float u, float w ) { return Depth( nx * u + tx * w, ny * u + ty * w ) > margin; };
+			if( f )
+			{
+				if( !Inside( u2, v ) || !Inside( u3, v + dv ) )
+				{
+					b.Dot( nx * u1 + tx * v, ny * u1 + ty * v, 0.025f );
+					continue;
+				}
+				// As far out as the shape goes, up to four times the room of the box.
+				float stepU = std::max( f->step * 0.5f / size, 0.01f );
+				uEnd        = u3;
+				while( uEnd < 4.0f * boxN && Inside( uEnd + stepU, v + dv ) )
+					uEnd += stepU;
+				uEnd = u3 + ( uEnd - u3 ) * rng.Range( 0.6f, 1.0f );
+			}
 			Line( u1, v, u2, v );
 			Line( u2, v, u3, v + dv );
 			Line( u3, v + dv, uEnd, v + dv );
 			b.Ring( nx * uEnd + tx * ( v + dv ), ny * uEnd + ty * ( v + dv ), 0.035f );
 		}
 	}
+	b.SetBase();
 }
 
 // A star polygon in a circle, with occult-diagram ornaments.
@@ -487,25 +768,31 @@ void Sigil( Builder& b, Rng& rng, float c )
 }
 
 // Stars joined by their minimum spanning tree.
-void Constellation( Builder& b, Rng& rng, float c, float bx, float by )
+// With a shape, stars only inside it, as many as its area holds.
+void Constellation( Builder& b, Rng& rng, float c, float bx, float by, const Field* f )
 {
 	b.Place();
-	size_t count = (size_t)( 5 + (int)( c * 10.0f ) );
+	float unit   = f ? Thickness( *f ) : 1.0f;// sizes and spacing follow the shape's thickness
+	float fill   = f && unit > 0.0f ? std::min( std::max( Area( *f ) / ( PI * unit * unit ), 1.0f ), 25.0f ) : 1.0f;
+	size_t count = (size_t)( ( 5.0f + c * 10.0f ) * fill );
 	std::vector< Vec > stars;
-	for( int attempt = 0; attempt < 400 && stars.size() < count; ++attempt )
+	for( size_t attempt = 0; attempt < 80 * count && stars.size() < count; ++attempt )
 	{
 		Vec p     = { rng.Range( -bx, bx ) * 0.9f, rng.Range( -by, by ) * 0.9f };
-		bool free = true;
-		for( const Vec& s : stars )
-			free = free && std::hypot( s.x - p.x, s.y - p.y ) > 0.22f;
+		bool free = !f || f->At( p.x, p.y ) > 0.08f * unit;
+		for( size_t s = 0; free && s < stars.size(); ++s )
+			free = std::hypot( stars[ s ].x - p.x, stars[ s ].y - p.y ) > 0.22f * unit;
 		if( free )
 			stars.push_back( p );
 	}
 	size_t n = stars.size();
+	if( n == 0 )
+		return;
+	auto Star = [ & ]( const Vec& p ) { b.Dot( p.x, p.y, rng.Range( 0.02f, 0.055f ) * unit ); };
 	std::vector< bool > linked( n, false );
 	std::vector< float > nearest( n, 1e30f );
 	std::vector< size_t > parent( n, 0 );
-	b.Dot( stars[ 0 ].x, stars[ 0 ].y, rng.Range( 0.02f, 0.055f ) );
+	Star( stars[ 0 ] );
 	linked[ 0 ] = true;
 	for( size_t i = 1; i < n; ++i )
 		nearest[ i ] = std::hypot( stars[ i ].x - stars[ 0 ].x, stars[ i ].y - stars[ 0 ].y );
@@ -521,7 +808,7 @@ void Constellation( Builder& b, Rng& rng, float c, float bx, float by )
 			}
 		linked[ j ] = true;
 		b.Line( stars[ parent[ j ] ].x, stars[ parent[ j ] ].y, stars[ j ].x, stars[ j ].y );
-		b.Dot( stars[ j ].x, stars[ j ].y, rng.Range( 0.02f, 0.055f ) );
+		Star( stars[ j ] );
 		for( size_t i = 0; i < n; ++i )
 		{
 			float d = std::hypot( stars[ i ].x - stars[ j ].x, stars[ i ].y - stars[ j ].y );
@@ -535,13 +822,15 @@ void Constellation( Builder& b, Rng& rng, float c, float bx, float by )
 }
 
 // The passages of a random maze, drawn in the order it is dug.
-void Maze( Builder& b, Rng& rng, float c, float bx, float by )
+// With a shape, only its cells, one maze per separate part of it.
+void Maze( Builder& b, Rng& rng, float c, float bx, float by, const Field* f )
 {
 	b.Place();
-	float density = 3.0f + c * 5.0f;
+	float density = ( 3.0f + c * 5.0f ) / ( f ? std::max( Thickness( *f ), 1e-3f ) : 1.0f );
 	int cols      = std::max( 2, (int)std::round( density * bx ) );
 	int rows      = std::max( 2, (int)std::round( density * by ) );
-	while( cols * rows > 60 )
+	int most      = f ? 1500 : 60;
+	while( cols * rows > most )
 		( cols >= rows ? cols : rows )--;
 	float sx = 2.0f * bx / (float)cols;
 	float sy = 2.0f * by / (float)rows;
@@ -550,46 +839,63 @@ void Maze( Builder& b, Rng& rng, float c, float bx, float by )
 	const int DX[ 4 ] = { 1, 0, -1, 0 };
 	const int DY[ 4 ] = { 0, 1, 0, -1 };
 
+	// Cells outside the shape count as visited from the start.
 	std::vector< char > visited( (size_t)( cols * rows ), 0 );
-	int start = rng.Int( cols * rows );
-	std::vector< int > stack = { start };
-	visited[ start ] = 1;
-	b.Ring( X( start ), Y( start ), 0.25f * std::min( sx, sy ) );
-	int lastDir   = -1;
-	bool advanced = false;
-	while( !stack.empty() )
+	std::vector< int > starts;
+	for( int k = 0; k < cols * rows; ++k )
 	{
-		int cell = stack.back();
-		int x = cell % cols, y = cell / cols;
-		int options[ 4 ], count = 0;
-		for( int d = 0; d < 4; ++d )
-		{
-			int nx = x + DX[ d ], ny = y + DY[ d ];
-			if( nx >= 0 && ny >= 0 && nx < cols && ny < rows && !visited[ ny * cols + nx ] )
-				options[ count++ ] = d;
-		}
-		if( count == 0 )
-		{
-			if( advanced )// dead end
-				b.Dot( X( cell ), Y( cell ), 0.12f * std::min( sx, sy ) );
-			stack.pop_back();
-			advanced = false;
-			lastDir  = -1;
-			continue;
-		}
-		int d    = options[ rng.Int( count ) ];
-		int next = ( y + DY[ d ] ) * cols + x + DX[ d ];
-		visited[ next ] = 1;
-		if( d == lastDir )// straight on: lengthen the last line
-		{
-			b.prims.back().bx = X( next );
-			b.prims.back().by = Y( next );
-		}
+		if( f && f->At( X( k ), Y( k ) ) < 0.3f * std::min( sx, sy ) )
+			visited[ k ] = 1;
 		else
-			b.Line( X( cell ), Y( cell ), X( next ), Y( next ) );
-		lastDir  = d;
-		advanced = true;
-		stack.push_back( next );
+			starts.push_back( k );
+	}
+	if( starts.empty() )
+		return;
+	// From a random cell first, then from the first cell of each part not reached yet.
+	std::swap( starts[ 0 ], starts[ rng.Int( (int)starts.size() ) ] );
+	for( int start : starts )
+	{
+		if( visited[ start ] )
+			continue;
+		std::vector< int > stack = { start };
+		visited[ start ] = 1;
+		b.Ring( X( start ), Y( start ), 0.25f * std::min( sx, sy ) );
+		int lastDir   = -1;
+		bool advanced = false;
+		while( !stack.empty() )
+		{
+			int cell = stack.back();
+			int x = cell % cols, y = cell / cols;
+			int options[ 4 ], count = 0;
+			for( int d = 0; d < 4; ++d )
+			{
+				int nx = x + DX[ d ], ny = y + DY[ d ];
+				if( nx >= 0 && ny >= 0 && nx < cols && ny < rows && !visited[ ny * cols + nx ] )
+					options[ count++ ] = d;
+			}
+			if( count == 0 )
+			{
+				if( advanced )// dead end
+					b.Dot( X( cell ), Y( cell ), 0.12f * std::min( sx, sy ) );
+				stack.pop_back();
+				advanced = false;
+				lastDir  = -1;
+				continue;
+			}
+			int d    = options[ rng.Int( count ) ];
+			int next = ( y + DY[ d ] ) * cols + x + DX[ d ];
+			visited[ next ] = 1;
+			if( d == lastDir )// straight on: lengthen the last line
+			{
+				b.prims.back().bx = X( next );
+				b.prims.back().by = Y( next );
+			}
+			else
+				b.Line( X( cell ), Y( cell ), X( next ), Y( next ) );
+			lastDir  = d;
+			advanced = true;
+			stack.push_back( next );
+		}
 	}
 }
 
@@ -654,29 +960,296 @@ void Hud( Builder& b, Rng& rng, float c )
 	b.Dot( 0, 0, 0.025f );
 }
 
+// ---- Styles that follow a shape ----
+
+// Symbols in the largest free circles of the shape, biggest first, until they get too small.
+void Pack( Builder& b, Rng& rng, float c, const Field& f, void ( *symbol )( Builder&, Rng&, float ) )
+{
+	std::vector< Circle > taken;
+	int count   = 1 + (int)( c * 15.0f );
+	float first = 0.0f;
+	for( int i = 0; i < count; ++i )
+	{
+		Circle circle = Largest( f, taken );
+		if( i == 0 )
+			first = circle.radius;
+		if( circle.radius <= 0.0f || circle.radius < first * 0.2f || circle.radius < 1.5f * f.step )
+			break;
+		b.SetBase( circle.centre.x, circle.centre.y, circle.radius * f.size );
+		symbol( b, rng, c );
+		taken.push_back( circle );
+	}
+	b.SetBase();
+}
+
+void PackChips( Builder& b, Rng& rng, float c, const Field& f )
+{
+	std::vector< Circle > taken;
+	int count   = 1 + (int)( c * 4.0f );
+	float first = 0.0f;
+	for( int i = 0; i < count; ++i )
+	{
+		Circle circle = Largest( f, taken );
+		if( i == 0 )
+			first = circle.radius;
+		if( circle.radius <= 0.0f || circle.radius < first * 0.35f || circle.radius < 3.0f * f.step )
+			break;
+		// A body about half the circle; its traces run on to the edges of the shape.
+		Chip( b, rng, c, 1.2f, 1.2f, &f, circle.centre, circle.radius * f.size );
+		taken.push_back( circle );
+	}
+}
+
+// Edge of the shape, then a band of runes along it, then a rune in what is left in the middle.
+void RuneBand( Builder& b, Rng& rng, float c, const Field& f )
+{
+	Circle deepest = Largest( f, {} );
+	if( deepest.radius <= 0.0f )
+		return;
+	float edge  = std::max( 0.05f * deepest.radius, f.step );
+	float band  = 0.32f * deepest.radius * f.size;
+	float rune  = band * 0.36f;// half height of a rune
+	b.Place();
+	for( const std::vector< Vec >& line : Contours( f, edge ) )
+		b.Path( line );
+	if( c > 0.3f )
+		for( const std::vector< Vec >& line : Contours( f, edge + band ) )
+			b.Path( line );
+	// Spread wider when the whole band would hold too many runes.
+	std::vector< std::vector< Vec > > middles = Contours( f, edge + band * 0.5f );
+	float total = 0.0f;
+	for( const std::vector< Vec >& line : middles )
+		total += Length( line );
+	float spacing = std::max( rune * 1.5f, total / ( 60.0f + c * 200.0f ) );
+	for( const std::vector< Vec >& line : middles )
+	{
+		float length = Length( line );
+		int count    = (int)( length / spacing );
+		for( int k = 0; k < count; ++k )
+		{
+			Vec direction;
+			Vec p   = PointAlong( line, ( (float)k + 0.5f ) * length / (float)count, &direction );
+			Vec out = Outward( f, p );
+			// Upright towards the outside of the shape.
+			b.Place( rune, std::atan2( out.y, out.x ) - PI / 2.0f, p.x, p.y );
+			DrawRune( b, RandomRune( rng ), 0.0f, false );
+			if( c > 0.6f )
+			{
+				Vec m = PointAlong( line, ( (float)k + 1.0f ) * length / (float)count );
+				b.Place();
+				b.Dot( m.x, m.y, rune * 0.15f );
+			}
+		}
+	}
+	float inner = deepest.radius - edge - band;
+	if( inner > 2.0f * f.step )
+	{
+		b.SetBase( deepest.centre.x, deepest.centre.y, inner * 0.85f );
+		Bindrune( b, rng, c * 0.5f );
+		b.SetBase();
+	}
+	b.Place();
+}
+
+// Points spread along the inset outline, joined as a star, with ornaments.
+void SigilShape( Builder& b, Rng& rng, float c, const Field& f )
+{
+	Circle deepest = Largest( f, {} );
+	if( deepest.radius <= 0.0f )
+		return;
+	float R     = deepest.radius;
+	float level = std::max( 0.08f * R, f.step );
+	b.Place();
+	std::vector< std::vector< Vec > > lines = Contours( f, level );
+	if( lines.empty() )
+		return;
+	float total = 0.0f;
+	for( const std::vector< Vec >& line : lines )
+	{
+		b.Path( line );
+		total += Length( line );
+	}
+	// Points along each outline, in proportion to its length; each outline makes its own star,
+	// whose chords are kept only where they stay inside the shape.
+	int perimeterPoints = 5 + rng.Int( 5 ) + (int)( c * 6.0f );
+	int k               = 1 + rng.Int( 3 );
+	std::vector< Vec > points;
+	for( const std::vector< Vec >& line : lines )
+	{
+		float length = Length( line );
+		int n        = std::max( 3, (int)std::round( (float)perimeterPoints * length / ( total / std::sqrt( (float)lines.size() ) ) ) );
+		n            = std::min( n, 60 );
+		float start  = rng.Range( 0.0f, length );
+		size_t first = points.size();
+		for( int i = 0; i < n; ++i )
+			points.push_back( PointAlong( line, std::fmod( start + length * (float)i / (float)n, length ) ) );
+		int step = std::min( k, std::max( 1, ( n - 1 ) / 2 ) );
+		for( int i = 0; i < n; ++i )
+		{
+			Vec p = points[ first + i ], q = points[ first + ( i + step ) % n ];
+			int samples = (int)std::ceil( std::hypot( q.x - p.x, q.y - p.y ) / ( f.step * 0.5f ) );
+			bool inside = true;
+			for( int s = 1; s < samples && inside; ++s )
+			{
+				float t = (float)s / (float)samples;
+				inside  = f.At( p.x + ( q.x - p.x ) * t, p.y + ( q.y - p.y ) * t ) > 0.0f;
+			}
+			if( inside )
+				b.Line( p.x, p.y, q.x, q.y );
+		}
+	}
+
+	int order[ 5 ] = { 0, 1, 2, 3, 4 };
+	for( int i = 4; i > 0; --i )
+		std::swap( order[ i ], order[ rng.Int( i + 1 ) ] );
+	int extras = 1 + (int)( c * 2.99f );
+	for( int e = 0; e < extras; ++e )
+	{
+		switch( order[ e ] )
+		{
+		case 0:// inner outline
+			for( const std::vector< Vec >& line : Contours( f, 0.5f * R ) )
+				b.Path( line );
+			break;
+		case 1:// small circles on the points
+			for( const Vec& p : points )
+				b.Ring( p.x, p.y, 0.06f * R );
+			break;
+		case 2:// spokes from the deepest point
+			for( const Vec& p : points )
+				b.Line( deepest.centre.x, deepest.centre.y, p.x, p.y );
+			break;
+		case 3:// crescent in the middle
+			b.Arc( deepest.centre.x, deepest.centre.y, 0.28f * R, PI * 0.3f, PI * 1.7f );
+			b.Arc( deepest.centre.x + 0.1f * R, deepest.centre.y, 0.22f * R, PI * 0.35f, PI * 1.65f );
+			break;
+		default:// second outline just inside the edge
+			for( const std::vector< Vec >& line : Contours( f, level * 0.4f ) )
+				b.Path( line );
+			break;
+		}
+	}
+}
+
+// Outlines of the shape inset step by step: plain, dashed, graduated or dotted; a crosshair in the middle.
+void HudShape( Builder& b, Rng& rng, float c, const Field& f )
+{
+	Circle deepest = Largest( f, {} );
+	if( deepest.radius <= 0.0f )
+		return;
+	float R     = deepest.radius;
+	float level = std::max( 0.05f * R, f.step );
+	int rings   = 2 + (int)( c * 3.0f );
+	b.Place();
+	for( int i = 0; i < rings && level < 0.85f * R; ++i )
+	{
+		int kind = rng.Int( 4 );
+		for( const std::vector< Vec >& line : Contours( f, level ) )
+		{
+			float length = Length( line );
+			switch( kind )
+			{
+			case 0:
+				b.Path( line );
+				break;
+			case 1:
+			{
+				float dash = rng.Range( 0.08f, 0.2f ) * R;
+				for( float s = 0.0f; s + dash * 0.5f < length; s += dash * 2.0f )
+					b.Path( Piece( line, s, std::min( s + dash, length ) ) );
+				break;
+			}
+			case 2:
+			{
+				b.Path( line );
+				float spacing = 0.08f * R;
+				int ticks     = std::min( (int)( length / spacing ), 200 );
+				for( int t = 0; t < ticks; ++t )
+				{
+					Vec p   = PointAlong( line, (float)t * spacing );
+					Vec out = Outward( f, p );
+					float l = ( t % 4 == 0 ? 0.08f : 0.04f ) * R;
+					b.Line( p.x, p.y, p.x - out.x * l, p.y - out.y * l );
+				}
+				break;
+			}
+			default:
+			{
+				b.Path( line );
+				int dots = 2 + rng.Int( 3 );
+				for( int t = 0; t < dots; ++t )
+				{
+					Vec p = PointAlong( line, rng.Range( 0.0f, length ) );
+					b.Dot( p.x, p.y, 0.025f * R );
+				}
+				break;
+			}
+			}
+		}
+		level += rng.Range( 0.12f, 0.2f ) * R;
+	}
+	b.SetBase( deepest.centre.x, deepest.centre.y, R );
+	b.Line( -0.12f, 0, -0.04f, 0 );
+	b.Line( 0.04f, 0, 0.12f, 0 );
+	b.Line( 0, -0.12f, 0, -0.04f );
+	b.Line( 0, 0.04f, 0, 0.12f );
+	b.Dot( 0, 0, 0.025f );
+	b.SetBase();
+}
+
 }//End anonymous namespace
 
-std::vector< Prim > Generate( Style style, uint32_t seed, float complexity, float boxX, float boxY )
+float Field::At( float x, float y ) const
+{
+	float u = ( x - x0 ) / step, v = ( y - y0 ) / step;
+	if( cols < 2 || rows < 2 || u < 0.0f || v < 0.0f || u > (float)( cols - 1 ) || v > (float)( rows - 1 ) )
+		return -step;
+	int i = std::min( (int)u, cols - 2 ), j = std::min( (int)v, rows - 2 );
+	float fu = u - (float)i, fv = v - (float)j;
+	const float* row0 = &values[ (size_t)j * cols + i ];
+	const float* row1 = row0 + cols;
+	return ( row0[ 0 ] * ( 1.0f - fu ) + row0[ 1 ] * fu ) * ( 1.0f - fv ) + ( row1[ 0 ] * ( 1.0f - fu ) + row1[ 1 ] * fu ) * fv;
+}
+
+std::vector< Prim > Generate( Style style, uint32_t seed, float complexity, float boxX, float boxY, const Field* shape )
 {
 	Rng rng( seed );
 	Builder b;
 	if( style >= STYLE_COUNT )
 		style = (Style)rng.Int( STYLE_COUNT );
 	float c = std::min( std::max( complexity, 0.0f ), 1.0f );
-	switch( style )
+	if( shape )
 	{
-	case FUTHARK: Futhark( b, rng, c ); break;
-	case BINDRUNE: Bindrune( b, rng, c ); break;
-	case RUNE_CIRCLE: RuneCircle( b, rng, c ); break;
-	case STAVE: Stave( b, rng, c ); break;
-	case OGHAM: Ogham( b, rng, c ); break;
-	case CIRCUIT: Circuit( b, rng, c, boxX, boxY ); break;
-	case CHIP: Chip( b, rng, c, boxX, boxY ); break;
-	case SIGIL: Sigil( b, rng, c ); break;
-	case CONSTELLATION: Constellation( b, rng, c, boxX, boxY ); break;
-	case MAZE: Maze( b, rng, c, boxX, boxY ); break;
-	default: Hud( b, rng, c ); break;
+		switch( style )
+		{
+		case FUTHARK: Pack( b, rng, c, *shape, Futhark ); break;
+		case BINDRUNE: Pack( b, rng, c, *shape, Bindrune ); break;
+		case RUNE_CIRCLE: RuneBand( b, rng, c, *shape ); break;
+		case STAVE: Pack( b, rng, c, *shape, Stave ); break;
+		case OGHAM: Pack( b, rng, c, *shape, Ogham ); break;
+		case CIRCUIT: Circuit( b, rng, c, boxX, boxY, shape ); break;
+		case CHIP: PackChips( b, rng, c, *shape ); break;
+		case SIGIL: SigilShape( b, rng, c, *shape ); break;
+		case CONSTELLATION: Constellation( b, rng, c, boxX, boxY, shape ); break;
+		case MAZE: Maze( b, rng, c, boxX, boxY, shape ); break;
+		default: HudShape( b, rng, c, *shape ); break;
+		}
 	}
+	else
+		switch( style )
+		{
+		case FUTHARK: Futhark( b, rng, c ); break;
+		case BINDRUNE: Bindrune( b, rng, c ); break;
+		case RUNE_CIRCLE: RuneCircle( b, rng, c ); break;
+		case STAVE: Stave( b, rng, c ); break;
+		case OGHAM: Ogham( b, rng, c ); break;
+		case CIRCUIT: Circuit( b, rng, c, boxX, boxY, nullptr ); break;
+		case CHIP: Chip( b, rng, c, boxX, boxY ); break;
+		case SIGIL: Sigil( b, rng, c ); break;
+		case CONSTELLATION: Constellation( b, rng, c, boxX, boxY, nullptr ); break;
+		case MAZE: Maze( b, rng, c, boxX, boxY, nullptr ); break;
+		default: Hud( b, rng, c ); break;
+		}
 
 	// Along the glyph in drawing order, by length; a dot counts as a short stroke.
 	std::vector< Prim >& prims = b.prims;

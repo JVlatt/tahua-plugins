@@ -40,7 +40,24 @@ struct Prim
 	float alongEnd   = 0.0f;
 };
 
-// In glyph units, y up. Symbol styles (runes, sigils...) fit the [-1, 1] square; area styles
-// (circuit, maze...) fill [-boxX, boxX] x [-boxY, boxY]. The same arguments give the same glyph.
-std::vector< Prim > Generate( Style style, uint32_t seed, float complexity, float boxX, float boxY );
+// A shape for the glyph to follow: its signed distance to the outline (positive inside), sampled on
+// a grid, in glyph units.
+struct Field
+{
+	int cols   = 0;
+	int rows   = 0;
+	float x0   = 0.0f;// where value 0 is
+	float y0   = 0.0f;
+	float step = 1.0f;// grid spacing
+	std::vector< float > values;// rows of cols values, from the bottom
+	float size = 1.0f;// how much of its room each packed symbol takes
+
+	// Bilinear; negative outside the grid.
+	float At( float x, float y ) const;
+};
+
+// In glyph units, y up. Without a shape, symbol styles (runes, sigils...) fit the [-1, 1] square and
+// area styles (circuit, maze...) fill [-boxX, boxX] x [-boxY, boxY]. With one, every style follows it.
+// The same arguments give the same glyph.
+std::vector< Prim > Generate( Style style, uint32_t seed, float complexity, float boxX, float boxY, const Field* shape = nullptr );
 }//End namespace glyphs
