@@ -15,14 +15,28 @@ public:
 	void Upload( const std::vector< float >& samples, int sliceCount );
 	void Release();
 
+	// How a follower moves after the level: as the level (linear), on a spring with no overshoot
+	// (smooth) or with one (elastic, more with elasticity), or falling onto it and bouncing
+	// (bounce, higher with elasticity). speed in Hz sets how fast.
+	enum Curve
+	{
+		CURVE_LINEAR,
+		CURVE_SMOOTH,
+		CURVE_ELASTIC,
+		CURVE_BOUNCE,
+	};
 	struct Settings
 	{
 		float threshold, fadeIn, fadeOut, deltaTime;
+		int curve        = CURVE_LINEAR;
+		float speed      = 2.0f;
+		float elasticity = 0.0f;
 	};
 	// Leaves the viewport set to the 1 x sliceCount levels target: the caller restores its own.
 	void Update( const FFGLTextureStruct& input, const Settings& settings, ffglex::FFGLScreenQuad& quad );
 
-	// 1 x sliceCount, GL_R32F: read with texelFetch( levels, ivec2( 0, slice ), 0 ).r
+	// 1 x sliceCount, GL_RGBA32F: read with texelFetch( levels, ivec2( 0, slice ), 0 ): r is the
+	// level, g the follower's position (which can go past 0 and 1), b its speed.
 	GLuint Texture() const;
 
 private:

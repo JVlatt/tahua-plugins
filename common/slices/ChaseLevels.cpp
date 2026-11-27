@@ -28,6 +28,9 @@ uniform float threshold;
 uniform float fadeIn;
 uniform float fadeOut;
 uniform float deltaTime;
+uniform int curve;// ChaseLevels::Curve
+uniform float speed;
+uniform float elasticity;
 out vec4 fragColor;
 
 void main()
@@ -41,10 +44,47 @@ void main()
 		sum += dot( texture( inputTexture, uv * maxUV ).rgb, vec3( 0.2126, 0.7152, 0.0722 ) );
 	}
 	float target   = sum / float( count ) > threshold ? 1.0 : 0.0;
-	float previous = texelFetch( previousLevels, ivec2( 0, slice ), 0 ).r;
-	float duration = target > previous ? fadeIn : fadeOut;
+	vec4 previous  = texelFetch( previousLevels, ivec2( 0, slice ), 0 );
+	float duration = target > previous.r ? fadeIn : fadeOut;
 	float maxStep  = duration > 0.0 ? deltaTime / duration : 1.0;
-	fragColor      = vec4( previous + clamp( target - previous, -maxStep, maxStep ) );
+	float level    = previous.r + clamp( target - previous.r, -maxStep, maxStep );
+
+	// The follower, pulled towards the level, in small enough steps to stay stable.
+	float position = level, velocity = 0.0;
+	if( curve != 0 )
+	{
+		position    = previous.g;
+		velocity    = previous.b;
+		float omega = 6.2831853 * speed;
+		// Smooth is critically damped; Elastic less and less damped as elasticity goes up.
+		float damping = 2.0 * omega * ( curve == 2 ? 1.0 - 0.95 * elasticity : 1.0 );
+		// Bounce: falls the whole way onto the level in half a period, and leaves it again with
+		// part of its speed.
+		float gravity     = 2.0 * omega * omega / 9.8696;// 2 / ( period / 2 )^2: a fall of 1
+		float restitution = 0.2 + 0.7 * elasticity;
+		int steps         = clamp( int( ceil( deltaTime / 0.002 ) ), 1, 100 );
+		float h           = deltaTime / float( steps );
+		for( int i = 0; i < steps; ++i )
+		{
+			if( curve == 3 )
+			{
+				float side = sign( level - position );
+				velocity += side * gravity * h;
+				position += velocity * h;
+				if( side != 0.0 && sign( level - position ) != side )
+				{
+					position = level;
+					velocity = abs( velocity ) * restitution < 0.05 ? 0.0 : -velocity * restitution;
+				}
+			}
+			else
+			{
+				velocity += ( omega * omega * ( level - position ) - damping * velocity ) * h;
+				position += velocity * h;
+			}
+		}
+	}
+	fragColor = vec4( level, position, velocity, 0.0 );
 }
 )";
 
@@ -65,10 +105,10 @@ void ChaseLevels::Upload( const std::vector< float >& samples, int count )
 {
 	sliceCount = count;
 
-	// 32-bit levels: a long fade moves them by tiny steps each frame. They start off.
+	// 32-bit levels: a long fade moves them by tiny steps each frame. They start off, at rest.
 	for( FFGLFBO& fbo : levels )
 	{
-		fbo.Initialise( 1, sliceCount, GL_R32F );
+		fbo.Initialise( 1, sliceCount, GL_RGBA32F );
 		ScopedFBOBinding fboBinding( fbo.GetGLID(), ScopedFBOBinding::RB_REVERT );
 		glClearColor( 0.0f, 0.0f, 0.0f, 0.0f );
 		glClear( GL_COLOR_BUFFER_BIT );
@@ -120,6 +160,9 @@ void ChaseLevels::Update( const FFGLTextureStruct& input, const Settings& settin
 	shader.Set( "fadeIn", settings.fadeIn );
 	shader.Set( "fadeOut", settings.fadeOut );
 	shader.Set( "deltaTime", settings.deltaTime );
+	shader.Set( "curve", settings.curve );
+	shader.Set( "speed", settings.speed );
+	shader.Set( "elasticity", settings.elasticity );
 	quad.Draw();
 
 	for( GLuint unit = 3; unit-- > 0; )

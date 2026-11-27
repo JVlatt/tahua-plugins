@@ -8,6 +8,8 @@ Plugins [FFGL](https://github.com/resolume/ffgl) (effets, sources, mixers) pour 
 | [Tahua SliceChase](plugins/SliceChase/README.md) | Effet | `TE02` | Allume les slices de l'Advanced Output là où la source du layer est lumineuse |
 | [Tahua Stage3D](plugins/Stage3D/README.md) | Effet | `TE03` | Vue 3D en perspective des écrans de l'Advanced Output, texturés par le layer |
 | [Tahua SliceEdges](plugins/SliceEdges/README.md) | Effet | `TE04` | Contours des slices de l'Advanced Output, avec pulse sur le beat |
+| [Tahua SliceGlyph](plugins/SliceGlyph/README.md) | Effet | `TE06` | Symboles procéduraux animés dans chaque slice de l'Advanced Output : runes, circuits imprimés, sceaux... |
+| [Tahua SliceWaves](plugins/SliceWaves/README.md) | Effet | `TE07` | Formes de Waves dans chaque slice de l'Advanced Output, décalées en Random, Order ou de proche en proche |
 | [Tahua Waves](plugins/Waves/README.md) | Source | `TS01` | Masques de vagues animés : anneaux, contours de bruit, pulses calés sur le beat |
 
 ## Structure

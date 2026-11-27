@@ -21,6 +21,7 @@ Un plugin FFGL n'a pas accès aux slices de Resolume. On lui donne donc le prese
 | Color | Couleur | | blanc | Couleur des slices allumées ; le reste est transparent |
 | Screens | Cases à cocher | | toutes cochées | Une case par écran du preset chargé (32 au maximum) |
 | Slices › Screen | Liste | | premier écran | Écran dont les cases ci-dessous montrent les familles. La liste porte les noms des écrans du preset |
+| Slices › Search | Texte | | vide | Recherche : seules les familles dont le nom contient ce texte (sans tenir compte des majuscules) ont une case. Vide, toutes s'affichent. Une famille masquée par la recherche garde son état coché ou décoché |
 | Slices | Cases à cocher | | toutes cochées | Une case par famille de slices de l'écran choisi dans Screen (64 au maximum) : la décocher éteint cette famille sur cet écran seulement |
 
 ### Écrans et familles
@@ -33,7 +34,7 @@ Les familles se choisissent **écran par écran** : la liste Screen du panneau S
 
 Ce qui est décoché est enregistré **par nom** dans la composition, pas par position. Les choix restent valables si le preset est réorganisé. Avec un autre preset, les noms qui n'y existent pas sont ignorés.
 
-Au-delà de 32 écrans, ou de 64 familles sur un écran, les suivants n'ont pas de case et restent toujours actifs ; un message l'indique dans le log de Resolume.
+Au-delà de 32 écrans, ou de 64 familles sur un écran, les suivants n'ont pas de case et restent toujours actifs ; un message l'indique dans le log de Resolume. Pour les familles, Search permet d'atteindre celles qui dépassent : seules les 64 premières familles qui correspondent à la recherche ont une case.
 
 ## Fonctionnement
 

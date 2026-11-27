@@ -1,6 +1,6 @@
 tahua_add_plugin(Waves
     ID      TS01
     TYPE    source
-    VERSION 1.0
+    VERSION 1.1
     DESCRIPTION "Animated wave masks: rings, noise contours, beat pulses"
     SOURCES Waves.h Waves.cpp)

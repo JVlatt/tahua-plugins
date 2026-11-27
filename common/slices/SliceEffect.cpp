@@ -1,5 +1,6 @@
 #include "SliceEffect.h"
 #include <algorithm>
+#include <cctype>
 #include <locale>
 #include <sstream>
 using namespace ffglqs;
@@ -83,6 +84,19 @@ std::string JoinOffsets( const std::map< std::string, float >& offsets )
 	return text.str();
 }
 
+// Whether text contains part, ignoring case and the spaces around part.
+bool Contains( const std::string& text, const std::string& part )
+{
+	auto lower = []( std::string s ) {
+		std::transform( s.begin(), s.end(), s.begin(), []( unsigned char c ) { return (char)std::tolower( c ); } );
+		return s;
+	};
+	size_t first = part.find_first_not_of( ' ' ), last = part.find_last_not_of( ' ' );
+	if( first == std::string::npos )
+		return true;
+	return lower( text ).find( lower( part.substr( first, last - first + 1 ) ) ) != std::string::npos;
+}
+
 void Log( const std::string& message )
 {
 	FFGLLog::LogToHost( ( std::string( TAHUA_PLUGIN_NAME ) + ": " + message ).c_str() );
@@ -125,6 +139,11 @@ void SliceEffect::AddSelectionParams( bool withOffsets )
 	// The family checkboxes show the families of the screen picked here.
 	familyScreenIndex = AddScreenOption( "FamilyScreen", "Screen" );
 	SetParamGroup( familyScreenIndex, "Slices" );
+	// Only the families whose name contains this text are shown, whatever the case.
+	unsigned int searchIndex = (unsigned int)params.size();
+	familySearch             = ParamText::create( "Search" );
+	AddParam( familySearch );
+	SetParamGroup( searchIndex, "Slices" );
 	firstFamilyBox = (unsigned int)params.size();
 	for( int i = 0; i < MAX_FAMILIES; ++i )
 	{
@@ -227,7 +246,9 @@ SliceEffect::SelectionUpdate SliceEffect::UpdateSelection()
 			toggled |= ReadFamilyOffsets();
 		}
 	}
-	if( !reload && !restored && !toggled && picked == familyScreen )
+	// A new search only shows other checkboxes, like picking another screen.
+	bool searched = familySearch->text != shownSearch;
+	if( !reload && !restored && !toggled && picked == familyScreen && !searched )
 		return {};
 
 	shownScreens.clear();
@@ -240,6 +261,7 @@ SliceEffect::SelectionUpdate SliceEffect::UpdateSelection()
 		screensOn.push_back( IsSelected( screen ) );
 	}
 	familyScreen = picked;
+	shownSearch  = familySearch->text;
 	shownFamilies.clear();
 	std::vector< bool > familiesOn;
 	if( picked >= 0 )
@@ -247,7 +269,8 @@ SliceEffect::SelectionUpdate SliceEffect::UpdateSelection()
 		const PresetScreen& screen = preset.screens[ picked ];
 		std::set< std::string > families;
 		for( const PresetSlice& slice : screen.slices )
-			families.insert( slice.family );
+			if( Contains( slice.family, shownSearch ) )
+				families.insert( slice.family );
 		shownFamilies.assign( families.begin(), families.end() );
 		shownFamilies.resize( std::min( shownFamilies.size(), (size_t)MAX_FAMILIES ) );
 		for( const std::string& family : shownFamilies )

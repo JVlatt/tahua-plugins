@@ -62,6 +62,7 @@ private:
 	unsigned int excludedFamiliesIndex = 0;
 	unsigned int firstScreenBox        = 0;
 	unsigned int familyScreenIndex     = 0;
+	std::shared_ptr< ffglqs::ParamText > familySearch;// filters the family checkboxes
 	unsigned int firstFamilyBox        = 0;// each followed by its offset slider, with withOffsets set
 	std::shared_ptr< ffglqs::ParamText > familyOffsetsText;// null without withOffsets
 	unsigned int familyOffsetsIndex = 0;
@@ -75,4 +76,5 @@ private:
 	std::vector< std::string > shownScreens; // name shown by each visible screen checkbox
 	std::vector< std::string > shownFamilies;// name shown by each visible family checkbox
 	int familyScreen = -1;                   // index of the screen whose families they are
+	std::string shownSearch;                 // the search they match
 };

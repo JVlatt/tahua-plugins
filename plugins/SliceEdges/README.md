@@ -29,6 +29,7 @@ Comme SliceChase, l'effet lit le preset Advanced Output exporté en XML (`Docume
 | Spread | Range | 0 – 1 | 0 | À 0, toutes les slices tournent ensemble ; à 1, chaque slice part d'un point différent de son tour (fixe pour une slice donnée) |
 | Screens | Cases à cocher | | toutes cochées | Une case par écran du preset chargé (32 au maximum) |
 | Slices › Screen | Liste | | premier écran | Écran dont les cases ci-dessous montrent les familles |
+| Slices › Search | Texte | | vide | Recherche : seules les familles dont le nom contient ce texte (sans tenir compte des majuscules) ont une case. Vide, toutes s'affichent. Une famille masquée par la recherche garde son état coché ou décoché |
 | Slices | Cases à cocher | | toutes cochées | Une case par famille de slices de l'écran choisi dans Screen (64 au maximum) |
 
 Avec Pulse Width et Pulse Fade à 0, le contour est fixe.
